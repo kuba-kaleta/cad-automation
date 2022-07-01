@@ -1,0 +1,114 @@
+/* Action created by jakub.krajanowski 2021-01-27 */
+
+let os, lineIter (`2DLine`)
+let list1, list2, list3, list4, cutoutList, listBody1, listBody2, listBody3 (list)
+let LineSketch, HoleSketch, sketch1 (Sketch)
+let pp1, pp2, p2p, point1, point2, ppgg, ppdd, pC, ppg, ppd (Point)
+let linePom, linePomEx (line)
+let pIter, p1, p2 (`2DPoint`)
+let i, j, k, licz, size1 (Integer)
+let feat (feature)
+let e1, e2 (Point)
+let plane1 (plane)
+let face1 (CATFace)
+let pwr (PowerCopy)
+let root (VPMReference)
+let r7, rIter (R7ProjectedGeometrySet)
+let holesBody, PartBody1 (BodyFeature)
+let catIter, cutout1 ( CATSmCutOut)
+let featureIter (Feature)
+let ppgx, ppgy, ppgz, ppdx, ppdy, ppdz (length)
+
+HoleSketch = PartBody .Find("Sketch", "x.Name == \"HoleSketch\"", true)
+SetWorkingContext(face)
+root = GetEditorRoots("VPMReference").GetItem(1)
+PartBody1 = root.Find("BodyFeature", "", true)
+LineSketch = PartBody1 .Find("Sketch", "x.Name == \"LineSketch\"", true)
+
+if(LineSketch == NULL){
+	Message( "Prosze dodac szkic bedacy wzorem otworu o nazwie LineSketch")
+}
+else{
+	if(HoleSketch == NULL){
+		Message( "Prosze dodac szkic bedacy wzorem otworu o nazwie HoleSketch")
+	}
+	else{
+//		i = 1
+//		size1 = listp.Size() //usuwanie produktow poprzedniego wywolania
+//		for i while i <= size1{
+//			listp .GetItem(1).Delete()
+//		} 
+				
+		list1 = LineSketch.Query("2DLine", "")
+		list2 = LineSketch.Query("2DPoint", "")
+		
+		i = 1
+		j = 1
+		for lineIter inside list1{ //TODO: zabezpieczyc przed mozliwoscia wybrania punktu nienalezacego do linii
+			ppg = point2dto3d( list2.GetItem(i)) //punkty kolejnych linii w LineSketch
+			ppd = point2dto3d( list2.GetItem(i+1))
+			
+			ppgx = ppg->coord(1) //wpolrzedne punktow wejsciowych
+			ppgy = ppg->coord(2)
+			ppgz = ppg->coord(3)
+			
+			ppdx = ppd->coord(1)
+			ppdy = ppd->coord(2)
+			ppdz = ppd->coord(3)
+			
+			set ppgg = translate(ppg, direction(ppgx - ppdx, ppgy - ppdy, ppgz - ppdz), 5mm) //punkty zewnetrzne, pozwalaja zachowac zwrot wymiarow
+			set ppdd = translate(ppd, direction(ppdx - ppgx, ppdy - ppgy, ppdz - ppgz), 5mm)
+			if distance(ppgg,ppdd) < distance(ppg,ppd){ //kiedy punkty skieruje do wewnatrz
+				set ppgg = translate(ppg, direction(ppdx - ppgx, ppdy - ppgy, ppdz - ppgz), 5mm)
+				set ppdd = translate(ppd, direction(ppgx - ppdx, ppgy - ppdy, ppgz - ppdz), 5mm)
+				Message("debug")
+			}
+						
+			listBody1 = PartBody1 ->Query("CATSmCutOut", "")
+			
+			pwr = InstantiateTemplate("pwr4", PartBody1 ) //power copy ze szkicem bazowym
+			pwr.SetAttributeObject("p0", face )
+			pwr.SetAttributeObject("p1", ppg )
+			pwr.SetAttributeObject("p2", ppd )
+			pwr.SetAttributeObject("p3", ppdd)
+			pwr.SetAttributeObject("p4", ppgg)
+			EndModifyTemplate(pwr)
+			i = i + 2
+			j = j + 1
+			
+			listBody2 = PartBody1 ->Query("CATSmCutOut", "")
+			listBody3 = listBody2->Subtract(listBody1)
+			cutout1 = listBody3.GetItem(1) //sposob na znalezienie operacji, ktora zostala wytworzona z power copy
+			
+			list3 = cutout1.Query("R7ProjectedGeometrySet", "") //usuwanie odniesien w nowych szkicach - izolacja szkicu
+			r7 = list3.GetItem(1) //nalezy usunac wszystkie projecty, ich ilosc zalezy od elementow szkicu-wzoru
+			r7.Delete()
+			r7 = list3.GetItem(2)
+			r7.Delete()
+			
+			r7 = list3.GetItem(3)
+			r7.Delete()
+			r7 = list3.GetItem(4)
+			r7.Delete()
+			
+			r7 = list3.GetItem(5)
+			r7.Delete()
+			r7 = list3.GetItem(6)
+			r7.Delete()
+			
+			r7 = list3.GetItem(7)
+			r7.Delete()
+			r7 = list3.GetItem(8)
+			r7.Delete()
+			
+			r7 = list3.GetItem(9)
+			r7.Delete()
+			r7 = list3.GetItem(10)
+			r7.Delete()
+			
+			r7 = list3.GetItem(11)
+			r7.Delete()
+		}
+		root.Update()
+	}
+}

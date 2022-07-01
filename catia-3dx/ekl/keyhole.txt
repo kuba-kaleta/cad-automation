@@ -1,0 +1,91 @@
+/* Action created by jakub.krajanowski 2021-01-27 */ 
+//input: face (CATFace)
+
+let os, lineIter (`2DLine`)
+let list1, list2, list3, list4, cutoutList, listBody1, listBody2, listBody3 (list)
+let LineSketch, HoleSketch, sketch1 (Sketch)
+let pp1, pp2, p2p, point1, point2, ppgg, ppdd, pC (Point)
+let linePom, linePomEx (line)
+let pIter, p1, p2 (`2DPoint`)
+let i, j, k, licz, size1 (Integer)
+let feat (feature)
+let e1, e2 (Point)
+let plane1 (plane)
+let face1 (CATFace)
+let pwr (PowerCopy)
+let root (VPMReference)
+let r7, rIter (R7ProjectedGeometrySet)
+let holesBody, PartBody1 (BodyFeature)
+let catIter, cutout1 ( CATSmCutOut)
+let featureIter (Feature)
+
+HoleSketch = PartBody .Find("Sketch", "x.Name == \"HoleSketch\"", true)
+SetWorkingContext(face)
+root = GetEditorRoots("VPMReference").GetItem(1)
+PartBody1 = root.Find("BodyFeature", "", true)
+LineSketch = PartBody1 .Find("Sketch", "x.Name == \"LineSketch\"", true)
+
+if(LineSketch == NULL){
+	Message( "Prosze dodac szkic bedacy wzorem otworu o nazwie LineSketch")
+}
+else{
+	if(HoleSketch == NULL){
+		Message( "Prosze dodac szkic bedacy wzorem otworu o nazwie HoleSketch")
+	}
+	else{
+		//holesBody =  `prd-STER-01302020 A.1`  .Find("BodyFeature", "x.Name == \"HolePoints\"", true)
+		i = 1
+		size1 = listp.Size()
+		for i while i <= size1{
+			listp .GetItem(1).Delete()
+		} 
+		//point1 = PartBody .Find("Point", "x.Name == \"punktDol\"", true)//point2 = PartBody .Find("Point", "x.Name == \"punktGora\"", true)
+		
+		list1 = LineSketch.Query("2DLine", "")
+		list2 = LineSketch.Query("2DPoint", "")
+		//list4 = holesBody .Query("Point", "")
+		
+		i = 1
+		j = 1
+		for lineIter inside list1{ //TODO: zabezpieczyc przed mozliwoscia wybrania punktu nienalezacego do linii
+			pp1 = point2dto3d( list2.GetItem(i)) //punkty w LineSketch
+			pp2 = point2dto3d( list2.GetItem(i+1))
+			
+			//linePom = line(pp1, pp2)
+			//linePomEx = extrapolate (linePom, direction(linePom), 2mm, 2mm, true)
+			//pC = pointoncurveRatio(linePomEx, point(0mm,0mm,0mm), 0.5, true)
+			//sphereCircle = new("Circle","sphereCircle", GeoSett2) //konstrukcja sfery na srodku krzywizny adaptera
+			//sphereCircle = circleCtrRadius(pC, plane(point(0mm,0mm,0mm), linePomEx), length(pC, pp1) + 2mm, 0, 0deg, 180deg)  //circleCtrAxis(Geo1\Line.1 ,GeoSet1\nadkolePunkt ,5mm, 45deg, 135deg, true, 1)
+			//circlePoint = new("Circle","circlePoint", GeoSett2) 
+			//circlePoint = pointoncurve(sphereCircle, point(0mm, 0mm, -2000mm), 0mm, true)
+			//circleLine = new("Line","circleLine", GeoSett2)
+			//circleLine = line(adapterPunkt, circlePoint)
+			//sphere = new("Surface","sphere", GeoSett2)
+			//set sphere = revolve(sphereCircle, linePomEx, 0deg, 360deg)
+			//ppgg = near(intersect
+			
+			listBody1 = PartBody1 ->Query("CATSmCutOut", "")
+			pwr = InstantiateTemplate("pwr3", PartBody1  ) //power copy ze szkicem bazowym
+			pwr.SetAttributeObject("p0", face )
+			pwr.SetAttributeObject("p1", pp1 )
+			pwr.SetAttributeObject("p2", pp2 )
+			//pwr.SetAttributeObject("p2", ppgg )
+			//pwr.SetAttributeObject("p2", ppdd )
+			EndModifyTemplate(pwr)
+			i = i + 2
+			j = j + 1
+			
+			listBody2 = PartBody1 ->Query("CATSmCutOut", "")
+			listBody3 = listBody2->Subtract(listBody1)
+			cutout1 = listBody3.GetItem(1)
+			Notify("name: ", face.Name)
+			list3 = cutout1.Query("R7ProjectedGeometrySet", "") //usuwanie odniesien w nowych szkicach
+			r7 = list3.GetItem(1)
+			r7.Delete()
+			r7 = list3.GetItem(2)
+			r7.Delete()	
+		}
+		root.Update()
+	}
+}
+

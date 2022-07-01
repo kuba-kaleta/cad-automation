@@ -1,0 +1,717 @@
+'GetMaterial - uruchomienie na rysunku zlozenia, rekurencja po wszystkich elementach, sczytywanie materialu
+'uruchamiany na zlozeniu
+
+'getChildren
+Sub CATMain()
+        
+    If TypeName(CATIA.ActiveEditor.ActiveObject) = "VPMRootOccurrence" Then
+        
+    Dim specsAndGeomWindow1 As SpecsAndGeomWindow
+    Set specsAndGeomWindow1 = CATIA.ActiveWindow
+    
+    Dim viewer3D1   As Viewer3D
+    Set viewer3D1 = specsAndGeomWindow1.ActiveViewer
+    
+    Dim viewpoint3D1 As Viewpoint3D
+    Set viewpoint3D1 = viewer3D1.Viewpoint3D
+    
+    Dim currRenderType As Integer
+    currRenderType = viewer3D1.RenderingMode        'zapisanie poczatkowego wyswietlania
+    
+    viewer3D1.RenderingMode = catRenderMaterial        'nadanie "shading with material" w cel otwarcia materialow do odczytu ich nazw
+    
+    'define variables'
+    Dim editor      As editor
+    Dim root        As VPMRootOccurrence
+    Dim service     As PLMProductService
+    
+    'get the active editor and from it get the PLMProductService to find the root.'
+    Set editor = CATIA.ActiveEditor
+    Set service = editor.GetService("PLMProductService")
+    Set root = editor.ActiveObject        'service.RootOccurrence
+    
+    'define a collection data structure'
+    Dim children    As Collection
+    Set children = GetChildren(root)
+    Dim child       As VPMOccurrence
+    
+    'zmienne
+    Dim childMat    As String
+    Dim strNiesklMet As String
+    Dim strNieMet As String
+    Dim currGroup As String
+    strNiesklMet = ""
+    strNieMet = ""
+    
+    Dim i           As Integer
+    i = 0
+    Dim strMatBool As Boolean
+    Dim MatGroupsBool As Boolean
+    Dim NieMetBool As Boolean
+    Dim NiesklMetBool As Boolean
+    strMatBool = False
+    MatGroupsBool = False
+    NieMetBool = False
+    NiesklMetBool = False
+    
+    'tablice
+    Dim AllMat() As String
+    ReDim AllMat(children.Count)
+    Dim MatGroups() As String
+    ReDim MatGroups(children.Count)
+    Dim NiesklMet() As String
+    ReDim NiesklMet(children.Count)
+    Dim NieMet() As String
+    ReDim NieMet(children.Count)
+    
+    'loop over each child and print the name in a message box'
+    For Each child In children
+        childMat = GetMat(child)
+        If (childMat <> "") Then
+            strMatBool = True
+            currGroup = GetGroup(childMat)
+            AllMat(i) = childMat
+            If (currGroup = "1" Or currGroup = "2" Or currGroup = "7" Or currGroup = "8" Or currGroup = "22" Or currGroup = "23" Or currGroup = "25") Then
+                MatGroupsBool = True
+                MatGroups(i) = currGroup
+            
+            ElseIf (currGroup = "niemetal") Then
+                NieMetBool = True
+                NieMet(i) = currGroup
+                
+            Else
+                NiesklMetBool = True
+                NiesklMet(i) = currGroup
+            
+            End If
+            i = i + 1
+        End If
+    Next
+    
+    If strMatBool Then
+        strMat = "Znalezione materiały: " & vbNewLine & Join(eliminateDuplicate(AllMat), vbCrLf) & vbNewLine & vbNewLine
+    End If
+    
+    If MatGroupsBool Then
+        strGr = "Znalezione grupy materiałowe wg CR ISO 15608: " & vbNewLine & Join(eliminateDuplicate(MatGroups), ", ") & vbNewLine & vbNewLine
+    Else
+        strGr = "Nie znaleziono grup materiałowych" & vbNewLine & vbNewLine
+    End If
+    
+    If NiesklMetBool Then
+        strNiesklMet = "Metale niesklasyfikowane: " & vbNewLine & Join(eliminateDuplicate(NiesklMet), vbCrLf) & vbNewLine & vbNewLine
+    Else
+        strNiesklMet = ""
+    End If
+    
+    If NieMetBool Then
+        strNieMet = "Obecność materiałów niemetalowych"
+    Else
+        strNieMet = ""
+    End If
+    
+    MsgBox strMat & strGr & strNiesklMet & strNieMet
+    
+    viewer3D1.RenderingMode = currRenderType        'powrot do poczatkowego wyswietlania
+    
+    Else
+    
+    MsgBox "Obiekt nie jest złożeniem"
+    
+    End If
+    
+End Sub
+
+Function GetGroup(childMat As String) As String 'grupa materialowa wg IP-T01
+
+    If InStr(UCase(childMat), UCase("S235")) > 0 Or InStr(UCase(childMat), UCase("S355")) > 0 Or InStr(UCase(childMat), UCase("DC01")) > 0 Or InStr(UCase(childMat), UCase("E235")) > 0 Or InStr(UCase(childMat), UCase("E355")) > 0 Or InStr(UCase(childMat), UCase("Docol")) > 0 Or InStr(UCase(childMat), UCase("350")) > 0 Or InStr(UCase(childMat), UCase("11SMn30")) > 0 Or InStr(UCase(childMat), UCase("11SMnPb30")) > 0 Then
+        GetGroup = "1"
+    
+    ElseIf InStr(UCase(childMat), UCase("Domex")) > 0 Or InStr(UCase(childMat), UCase("S420")) > 0 Or InStr(UCase(childMat), UCase("S500")) > 0 Or InStr(UCase(childMat), UCase("S700")) > 0 Or InStr(UCase(childMat), UCase("800DP")) > 0 Then
+        GetGroup = "2"
+    
+    ElseIf InStr(UCase(childMat), UCase("X2CrNi12")) > 0 Then
+        GetGroup = "7"
+    
+    ElseIf InStr(UCase(childMat), UCase("X5CrNi18")) > 0 Then
+        GetGroup = "8"
+    
+    ElseIf InStr(UCase(childMat), UCase("6082-T6")) > 0 Then
+        GetGroup = "22"
+    
+    ElseIf InStr(UCase(childMat), UCase("5754")) > 0 And InStr(UCase(childMat), UCase("H22")) > 0 Then
+        GetGroup = "23"
+    
+    ElseIf InStr(UCase(childMat), UCase("ENAC")) > 0 And InStr(UCase(childMat), UCase("46000")) > 0 Then
+        GetGroup = "25"
+
+    ElseIf InStr(UCase(childMat), UCase("pa6")) > 0 Or InStr(UCase(childMat), UCase("poliamid")) > 0 Or InStr(UCase(childMat), UCase("pp")) > 0 Or InStr(UCase(childMat), UCase("rubber")) > 0 Or InStr(UCase(childMat), UCase("zywica")) > 0 Or InStr(UCase(childMat), UCase("pvc")) > 0 Or InStr(UCase(childMat), UCase("pcv")) > 0 Or InStr(UCase(childMat), UCase("abs")) > 0 Or InStr(UCase(childMat), UCase("pom")) > 0 Or InStr(UCase(childMat), UCase("polipropylen")) > 0 Or InStr(UCase(childMat), UCase("skóra")) > 0 Or InStr(UCase(childMat), UCase("pe")) > 0 Or InStr(UCase(childMat), UCase("epdm")) > 0 Or InStr(UCase(childMat), UCase("pc")) > 0 Or InStr(UCase(childMat), UCase("plastic")) > 0 Or InStr(UCase(childMat), UCase("tapicer")) > 0 Or InStr(UCase(childMat), UCase("tkanina")) > 0 Or InStr(UCase(childMat), UCase("sponge")) > 0 Or InStr(UCase(childMat), UCase("sklejka")) > 0 Or InStr(UCase(childMat), UCase("tkanina")) > 0 Or InStr(UCase(childMat), UCase("pianka")) > 0 Then
+        GetGroup = "niemetal"
+        
+    Else
+        GetGroup = childMat
+        
+    End If
+
+End Function
+
+Function GetMat(child As VPMOccurrence) As String        'get material
+    
+    'Retrieves the Product Service
+    Dim MyProductService As PLMProductService
+    Set MyProductService = CATIA.GetSessionService("PLMProductService")
+    
+    Dim myRepOccurrence As VPMRepOccurrence
+    Set myRepOccurrence = child.RepOccurrences.Item(1)
+    
+    Dim resultStr   As String
+    If myRepOccurrence Is Nothing Then
+        'MsgBox "myRepOccurrence is nothing"
+        resultStr = ""
+    Else
+        Dim myRepInstance As VPMRepInstance
+        Set myRepInstance = myRepOccurrence.RelatedRepInstance
+        
+        Dim myLink  As AnyObject
+        Set myLink = MyProductService.ComposeLink(child, myRepInstance, Nothing)
+        
+        Dim MatService   As MATPLMService
+        Set MatService = CATIA.GetSessionService("MATPLMService")
+        
+        ' Applied Material for Core Material
+        Dim MyCoreAppliedMat     As AppliedMaterial
+        Dim MyCoreMatRef      As Material
+        
+        ' Get Core Material and Applied-Material on Root Occurrence
+        MatService.GetMaterialCore myLink, MyCoreMatRef, MyCoreAppliedMat
+        
+        If MyCoreMatRef Is Nothing Then
+            'MsgBox "MyCoreMatRef is nothing"
+            resultStr = ""
+        Else
+            'MsgBox "Name Is " & child.Name
+            'MsgBox MyCoreMatRef.Name
+            resultStr = MyCoreMatRef.Name
+        End If
+        
+    End If
+    
+    GetMat = resultStr
+End Function
+
+Function eliminateDuplicate(poArr As Variant) As Variant 'sort, eliminate duplicated and empty records
+    Dim poArrNoDup()
+    
+    dupArrIndex = -1
+    For i = LBound(poArr) To UBound(poArr)
+        dupBool = False
+        
+        
+        For j = LBound(poArr) To i
+            If poArr(i) = poArr(j) And Not i = j Then
+                dupBool = True
+            End If
+        Next j
+        
+        If dupBool = False Then
+            dupArrIndex = dupArrIndex + 1
+            ReDim Preserve poArrNoDup(dupArrIndex)
+            poArrNoDup(dupArrIndex) = poArr(i)
+        End If
+    Next i
+    
+    Dim cleanArray() As String
+    Dim tempArray() As String
+    Dim oldIndex As Integer
+    Dim newIndex As Integer
+    ReDim tempArray(LBound(poArrNoDup) To UBound(poArrNoDup))
+    For oldIndex = LBound(poArrNoDup) To UBound(poArrNoDup)
+        If Not Trim(poArrNoDup(oldIndex) & " ") = "" Then
+        tempArray(newIndex) = poArrNoDup(oldIndex)
+        newIndex = newIndex + 1
+    End If
+    Next oldIndex
+    ReDim Preserve tempArray(LBound(poArrNoDup) To newIndex - 1)
+    cleanArray = tempArray
+    
+    Call QuickSort(cleanArray, 0, UBound(cleanArray))
+    
+    eliminateDuplicate = cleanArray
+End Function
+
+Public Function cleanArray(varArray() As Variant) As Variant()
+  Dim tempArray() As Variant
+  Dim oldIndex As Integer
+  Dim newIndex As Integer
+  ReDim tempArray(LBound(varArray) To UBound(varArray))
+  For oldIndex = LBound(varArray) To UBound(varArray)
+   If Not Trim(varArray(oldIndex) & " ") = "" Then
+     tempArray(newIndex) = varArray(oldIndex)
+     newIndex = newIndex + 1
+   End If
+ Next oldIndex
+ ReDim Preserve tempArray(LBound(varArray) To newIndex - 1)
+ cleanArray = tempArray
+End Function
+
+Public Sub QuickSort(vArray As Variant, inLow As Long, inHi As Long)
+  Dim pivot   As Variant
+  Dim tmpSwap As Variant
+  Dim tmpLow  As Long
+  Dim tmpHi   As Long
+
+  tmpLow = inLow
+  tmpHi = inHi
+
+  pivot = vArray((inLow + inHi) \ 2)
+
+  While (tmpLow <= tmpHi)
+     While (vArray(tmpLow) < pivot And tmpLow < inHi)
+        tmpLow = tmpLow + 1
+     Wend
+
+     While (pivot < vArray(tmpHi) And tmpHi > inLow)
+        tmpHi = tmpHi - 1
+     Wend
+
+     If (tmpLow <= tmpHi) Then
+        tmpSwap = vArray(tmpLow)
+        vArray(tmpLow) = vArray(tmpHi)
+        vArray(tmpHi) = tmpSwap
+        tmpLow = tmpLow + 1
+        tmpHi = tmpHi - 1
+     End If
+  Wend
+
+  If (inLow < tmpHi) Then QuickSort vArray, inLow, tmpHi
+  If (tmpLow < inHi) Then QuickSort vArray, tmpLow, inHi
+End Sub
+
+'function to take a root and return a collection'
+Function GetChildren(root As VPMRootOccurrence) As Collection
+    
+    Dim col         As Collection
+    Set col = New Collection
+    
+    'loop over nested occurrences in root'
+    Dim i           As Integer
+    For i = 1 To root.Occurrences.Count
+        'add occurrence to list'
+        col.Add root.Occurrences.Item(i)
+        
+        'call recursive function to get all nested occurrences
+        'inside current item and add it to the collection'
+        GetNestedChildren root.Occurrences.Item(i), col
+    Next
+    
+    Set GetChildren = col
+    
+End Function
+
+'recursive function'
+Sub GetNestedChildren(parent As VPMOccurrence, col As Collection)
+    
+    Dim i           As Integer
+    For i = 1 To parent.Occurrences.Count
+        'add current occurence to collection'
+        col.Add parent.Occurrences.Item(i)
+        'call the method on the current occurrence'
+        GetNestedChildren parent.Occurrences.Item(i), col
+    Next
+    
+End Sub
+
+
+
+
+
+'GetMaterial - uruchomienie na rysunku zlozenia, rekurencja po wszystkich elementach, sczytywanie materialu
+'uruchamiany na rysunku zlozenia
+
+'getChildren
+Sub CATMain()
+    
+    Dim myDrawingRoot As DrawingRoot
+    
+    If TypeName(CATIA.ActiveEditor.ActiveObject) = "DrawingRoot" Then
+        
+        Set myDrawingRoot = CATIA.ActiveEditor.ActiveObject
+        If (myDrawingRoot.ActiveSheet.Views.ActiveView.IsGenerative) Then ' Determines on what the Generative View Link is (an Occurence or a Part Body)
+    
+    Dim myGenView        ' As DrawingGenView
+    Set myGenView = myDrawingRoot.ActiveSheet.Views.ActiveView.DrawingGenView
+    
+    Dim nbInfoOnLink As Long
+    nbInfoOnLink = myGenView.GetNumberOfInfoForLink(1)
+    
+    ' Gets the Generative View Link
+    ReDim oInfoOnViewLink(nbInfoOnLink - 1) As Variant
+    myGenView.GetLink 1, oInfoOnViewLink
+    
+    ' Gets the Product Reference if it's an Occurence
+    If (nbInfoOnLink = 1) Then
+        Dim oProdOcc As VPMOccurrence
+        Dim oProdRef As VPMReference
+        
+        'Set oProdOcc = oInfoOnViewLink(0)        'MsgBox TypeName(oInfoOnViewLink(0))
+        'Set oProdRef = oProdOcc.InstanceOccurrenceOf.ReferenceInstanceOf
+        
+        Set oProdRef = oInfoOnViewLink(0)
+        ' Gets the Product Reference if it's a Part Body
+    ElseIf (nbInfoOnLink = 3) Then
+        
+        Dim oProdRepInst As VPMRepInstance
+        Set oProdRepInst = oInfoOnViewLink(1)
+        Set oProdRef = oProdRepInst.ReferenceInstanceOf.Father
+        
+    Else
+        MsgBox "Invalid Link"
+        Quit
+    End If
+    
+    ' 2/ Gets the Product Parameters
+    ' ------------------------------
+    ' Gets the SearchService object
+    Dim oSearchService As SearchService
+    Set oSearchService = CATIA.GetSessionService("Search")
+    
+    ' Creates a query using the DatabaseSearch object
+    Dim oDBSearch   As DatabaseSearch
+    Set oDBSearch = oSearchService.DatabaseSearch
+    
+    ' Gets the Product Reference PLM_ExternalID
+    Dim oProdPLMID  As String
+    oProdPLMID = oProdRef.GetAttributeValue("PLM_ExternalID")
+    
+    ' Sets the type of object to query, a criterion, and trigger the search
+    oDBSearch.BaseType = "VPMReference"
+    oDBSearch.AddEasyCriteria "PLM_ExternalID", oProdPLMID
+    
+    ' Launches the search
+    oSearchService.Search
+    
+    ' Retrieves the listed entities
+    Dim cPLMEntities As PLMEntities
+    Set cPLMEntities = oDBSearch.Results
+    
+    Dim oPLMOpenService        ' As PLMOpenService
+    
+    ' Gets the PLMOpen service & Open the first retrieved entity
+    Set oPLMOpenService = CATIA.GetSessionService("PLMOpenService")
+    Dim oEditor     As editor
+    oPLMOpenService.PLMOpen cPLMEntities.Item(1), oEditor
+    
+    Dim specsAndGeomWindow1 As SpecsAndGeomWindow
+    Set specsAndGeomWindow1 = CATIA.ActiveWindow
+    
+    Dim viewer3D1   As Viewer3D
+    Set viewer3D1 = specsAndGeomWindow1.ActiveViewer
+    
+    Dim viewpoint3D1 As Viewpoint3D
+    Set viewpoint3D1 = viewer3D1.Viewpoint3D
+    
+    Dim currRenderType As Integer
+    currRenderType = viewer3D1.RenderingMode        'zapisanie poczatkowego wyswietlania
+    
+    viewer3D1.RenderingMode = catRenderMaterial        'nadanie "shading with material" w cel otwarcia materialow do odczytu ich nazw
+    
+    'define variables'
+    Dim editor      As editor
+    Dim root        As VPMRootOccurrence
+    Dim service     As PLMProductService
+    
+    'get the active editor and from it get the PLMProductService to find the root.'
+    Set editor = CATIA.ActiveEditor
+    Set service = editor.GetService("PLMProductService")
+    Set root = oEditor.ActiveObject        'service.RootOccurrence
+    
+    'define a collection data structure'
+    Dim children    As Collection
+    Set children = GetChildren(root)
+    Dim child       As VPMOccurrence
+    
+    'zmienne
+    Dim childMat    As String
+    Dim strNiesklMet As String
+    Dim strNieMet As String
+    Dim currGroup As String
+    strNiesklMet = ""
+    strNieMet = ""
+    
+    Dim i           As Integer
+    i = 0
+    Dim strMatBool As Boolean
+    Dim MatGroupsBool As Boolean
+    Dim NieMetBool As Boolean
+    Dim NiesklMetBool As Boolean
+    strMatBool = False
+    MatGroupsBool = False
+    NieMetBool = False
+    NiesklMetBool = False
+    
+    'tablice
+    Dim AllMat() As String
+    ReDim AllMat(children.Count)
+    Dim MatGroups() As String
+    ReDim MatGroups(children.Count)
+    Dim NiesklMet() As String
+    ReDim NiesklMet(children.Count)
+    Dim NieMet() As String
+    ReDim NieMet(children.Count)
+    
+    'loop over each child and print the name in a message box'
+    For Each child In children
+        childMat = GetMat(child)
+        If (childMat <> "") Then
+            strMatBool = True
+            currGroup = GetGroup(childMat)
+            AllMat(i) = childMat
+            If (currGroup = "1" Or currGroup = "2" Or currGroup = "7" Or currGroup = "8" Or currGroup = "22" Or currGroup = "23" Or currGroup = "25") Then
+                MatGroupsBool = True
+                MatGroups(i) = currGroup
+            
+            ElseIf (currGroup = "niemetal") Then
+                NieMetBool = True
+                NieMet(i) = currGroup
+                
+            Else
+                NiesklMetBool = True
+                NiesklMet(i) = currGroup
+            
+            End If
+            i = i + 1
+        End If
+    Next
+    
+    If MatGroupsBool Then
+        strGr = "EN 15085 - CL3 / CPD / CT4" & vbNewLine & "Grupa materiałowa wg CR ISO 15608: " & Join(eliminateDuplicate(MatGroups), ", ") & vbNewLine
+    Else
+        strGr = "Nie znaleziono grup materiałowych" & vbNewLine
+    End If
+    
+    If NiesklMetBool Then
+        strNiesklMet = "Obecnosc metali niesklasyfikowanych" & vbNewLine
+    Else
+        strNiesklMet = ""
+    End If
+    
+    If NieMetBool Then
+        strNieMet = "Obecność materiałów niemetalowych"
+    Else
+        strNieMet = ""
+    End If
+    
+    viewer3D1.RenderingMode = currRenderType        'powrot do poczatkowego wyswietlania
+    
+    Dim oWindow     As Window
+    Set oWindow = CATIA.ActiveWindow
+    oWindow.Close
+
+    ' 3/ Creates the Drawing Text
+    ' -----------------------------------------
+    ' Gets the View
+    Dim myView      As DrawingView
+    Set myView = myDrawingRoot.ActiveSheet.Views.ActiveView
+    
+    Dim MyText As DrawingText
+    Set MyText = myView.Texts.Add(strGr & strNiesklMet & strNieMet, 0#, 0#)
+    MyText.SetFontName 0, 0, "SSS2"
+    
+        Else
+            MsgBox "Aktywuj widok rysunku"
+        End If
+    
+    Else
+        MsgBox "Otwórz rysunek złożenia i aktywuj wybrany widok"
+    End If
+    
+End Sub
+
+Function isInitialised(ByRef a() As String) As Boolean 'sprawdza czy tablica jest zainicjalizowana
+    isInitialised = False
+    On Error Resume Next
+    isInitialised = IsNumeric(UBound(a))
+End Function
+
+Function GetGroup(childMat As String) As String 'grupa materialowa wg IP-T01
+
+    If InStr(UCase(childMat), UCase("S235")) > 0 Or InStr(UCase(childMat), UCase("S355")) > 0 Or InStr(UCase(childMat), UCase("DC01")) > 0 Or InStr(UCase(childMat), UCase("E235")) > 0 Or InStr(UCase(childMat), UCase("E355")) > 0 Or InStr(UCase(childMat), UCase("Docol")) > 0 Or InStr(UCase(childMat), UCase("350")) > 0 Or InStr(UCase(childMat), UCase("11SMn30")) > 0 Or InStr(UCase(childMat), UCase("11SMnPb30")) > 0 Then
+        GetGroup = "1"
+    
+    ElseIf InStr(UCase(childMat), UCase("Domex")) > 0 Or InStr(UCase(childMat), UCase("S420")) > 0 Or InStr(UCase(childMat), UCase("S500")) > 0 Or InStr(UCase(childMat), UCase("S700")) > 0 Or InStr(UCase(childMat), UCase("800DP")) > 0 Then
+        GetGroup = "2"
+    
+    ElseIf InStr(UCase(childMat), UCase("X2CrNi12")) > 0 Then
+        GetGroup = "7"
+    
+    ElseIf InStr(UCase(childMat), UCase("X5CrNi18")) > 0 Then
+        GetGroup = "8"
+    
+    ElseIf InStr(UCase(childMat), UCase("6082-T6")) > 0 Then
+        GetGroup = "22"
+    
+    ElseIf InStr(UCase(childMat), UCase("5754")) > 0 And InStr(UCase(childMat), UCase("H22")) > 0 Then
+        GetGroup = "23"
+    
+    ElseIf InStr(UCase(childMat), UCase("ENAC")) > 0 And InStr(UCase(childMat), UCase("46000")) > 0 Then
+        GetGroup = "25"
+
+    ElseIf InStr(UCase(childMat), UCase("pa6")) > 0 Or InStr(UCase(childMat), UCase("poliamid")) > 0 Or InStr(UCase(childMat), UCase("pp")) > 0 Or InStr(UCase(childMat), UCase("rubber")) > 0 Or InStr(UCase(childMat), UCase("zywica")) > 0 Or InStr(UCase(childMat), UCase("pvc")) > 0 Or InStr(UCase(childMat), UCase("pcv")) > 0 Or InStr(UCase(childMat), UCase("abs")) > 0 Or InStr(UCase(childMat), UCase("pom")) > 0 Or InStr(UCase(childMat), UCase("polipropylen")) > 0 Or InStr(UCase(childMat), UCase("skóra")) > 0 Or InStr(UCase(childMat), UCase("pe")) > 0 Or InStr(UCase(childMat), UCase("epdm")) > 0 Or InStr(UCase(childMat), UCase("pc")) > 0 Or InStr(UCase(childMat), UCase("plastic")) > 0 Or InStr(UCase(childMat), UCase("tapicer")) > 0 Or InStr(UCase(childMat), UCase("tkanina")) > 0 Or InStr(UCase(childMat), UCase("sponge")) > 0 Or InStr(UCase(childMat), UCase("sklejka")) > 0 Or InStr(UCase(childMat), UCase("tkanina")) > 0 Then
+        GetGroup = "niemetal"
+        
+    Else
+        GetGroup = childMat
+        
+    End If
+
+End Function
+
+Function GetMat(child As VPMOccurrence) As String        'get material
+    
+    'Retrieves the Product Service
+    Dim MyProductService As PLMProductService
+    Set MyProductService = CATIA.GetSessionService("PLMProductService")
+    
+    Dim myRepOccurrence As VPMRepOccurrence
+    Set myRepOccurrence = child.RepOccurrences.Item(1)
+    
+    Dim resultStr   As String
+    If myRepOccurrence Is Nothing Then
+        'MsgBox "myRepOccurrence is nothing"
+        resultStr = ""
+    Else
+        Dim myRepInstance As VPMRepInstance
+        Set myRepInstance = myRepOccurrence.RelatedRepInstance
+        
+        Dim myLink  As AnyObject
+        Set myLink = MyProductService.ComposeLink(child, myRepInstance, Nothing)
+        
+        Dim MatService   As MATPLMService
+        Set MatService = CATIA.GetSessionService("MATPLMService")
+        
+        ' Applied Material for Core Material
+        Dim MyCoreAppliedMat     As AppliedMaterial
+        Dim MyCoreMatRef      As Material
+        
+        ' Get Core Material and Applied-Material on Root Occurrence
+        MatService.GetMaterialCore myLink, MyCoreMatRef, MyCoreAppliedMat
+        
+        If MyCoreMatRef Is Nothing Then
+            'MsgBox "MyCoreMatRef is nothing"
+            resultStr = ""
+        Else
+            'MsgBox "Name Is " & child.Name
+            'MsgBox MyCoreMatRef.Name
+            resultStr = MyCoreMatRef.Name
+        End If
+        
+    End If
+    
+    GetMat = resultStr
+End Function
+
+Function eliminateDuplicate(poArr As Variant) As Variant 'sort, eliminate duplicated and empty records
+    Dim poArrNoDup()
+    
+    dupArrIndex = -1
+    For i = LBound(poArr) To UBound(poArr)
+        dupBool = False
+        
+        For j = LBound(poArr) To i
+            If poArr(i) = poArr(j) And Not i = j Then
+                dupBool = True
+            End If
+        Next j
+        
+        If dupBool = False Then
+            dupArrIndex = dupArrIndex + 1
+            ReDim Preserve poArrNoDup(dupArrIndex)
+            poArrNoDup(dupArrIndex) = poArr(i)
+        End If
+    Next i
+    
+    j = LBound(poArrNoDup)
+    ReDim NewArr(LBound(poArrNoDup) To UBound(poArrNoDup))
+    For i = LBound(poArrNoDup) To UBound(poArrNoDup)
+        If poArrNoDup(i) <> "" Then
+            NewArr(j) = poArrNoDup(i)
+            j = j + 1
+        End If
+    Next i
+    ReDim Preserve NewArr(LBound(poArrNoDup) To j - 1)
+    
+    Call QuickSort(NewArr, 0, UBound(NewArr))
+    
+    eliminateDuplicate = NewArr
+End Function
+
+Public Sub QuickSort(vArray As Variant, inLow As Long, inHi As Long)
+  Dim pivot   As Variant
+  Dim tmpSwap As Variant
+  Dim tmpLow  As Long
+  Dim tmpHi   As Long
+
+  tmpLow = inLow
+  tmpHi = inHi
+
+  pivot = vArray((inLow + inHi) \ 2)
+
+  While (tmpLow <= tmpHi)
+     While (vArray(tmpLow) < pivot And tmpLow < inHi)
+        tmpLow = tmpLow + 1
+     Wend
+
+     While (pivot < vArray(tmpHi) And tmpHi > inLow)
+        tmpHi = tmpHi - 1
+     Wend
+
+     If (tmpLow <= tmpHi) Then
+        tmpSwap = vArray(tmpLow)
+        vArray(tmpLow) = vArray(tmpHi)
+        vArray(tmpHi) = tmpSwap
+        tmpLow = tmpLow + 1
+        tmpHi = tmpHi - 1
+     End If
+  Wend
+
+  If (inLow < tmpHi) Then QuickSort vArray, inLow, tmpHi
+  If (tmpLow < inHi) Then QuickSort vArray, tmpLow, inHi
+End Sub
+
+'function to take a root and return a collection'
+Function GetChildren(root As VPMRootOccurrence) As Collection
+    
+    Dim col         As Collection
+    Set col = New Collection
+    
+    'loop over nested occurrences in root'
+    Dim i           As Integer
+    For i = 1 To root.Occurrences.Count
+        'add occurrence to list'
+        col.Add root.Occurrences.Item(i)
+        
+        'call recursive function to get all nested occurrences
+        'inside current item and add it to the collection'
+        GetNestedChildren root.Occurrences.Item(i), col
+    Next
+    
+    Set GetChildren = col
+    
+End Function
+
+'recursive function'
+Sub GetNestedChildren(parent As VPMOccurrence, col As Collection)
+    
+    Dim i           As Integer
+    For i = 1 To parent.Occurrences.Count
+        'add current occurence to collection'
+        col.Add parent.Occurrences.Item(i)
+        'call the method on the current occurrence'
+        GetNestedChildren parent.Occurrences.Item(i), col
+    Next
+    
+End Sub
+
+
+
+
