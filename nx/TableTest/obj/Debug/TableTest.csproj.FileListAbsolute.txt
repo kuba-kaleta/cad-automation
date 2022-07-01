@@ -1,0 +1,14 @@
+C:\Users\jakub.krajanowski\source\repos\TableTest\bin\Debug\TableTest.dll
+C:\Users\jakub.krajanowski\source\repos\TableTest\bin\Debug\TableTest.pdb
+C:\Users\jakub.krajanowski\source\repos\TableTest\bin\Debug\NXOpen.dll
+C:\Users\jakub.krajanowski\source\repos\TableTest\bin\Debug\NXOpen.UF.dll
+C:\Users\jakub.krajanowski\source\repos\TableTest\bin\Debug\NXOpen.Utilities.dll
+C:\Users\jakub.krajanowski\source\repos\TableTest\bin\Debug\NXOpenUI.dll
+C:\Users\jakub.krajanowski\source\repos\TableTest\bin\Debug\NXOpen.xml
+C:\Users\jakub.krajanowski\source\repos\TableTest\bin\Debug\NXOpen.UF.xml
+C:\Users\jakub.krajanowski\source\repos\TableTest\bin\Debug\NXOpen.Utilities.xml
+C:\Users\jakub.krajanowski\source\repos\TableTest\bin\Debug\NXOpenUI.xml
+C:\Users\jakub.krajanowski\source\repos\TableTest\obj\Debug\TableTest.csproj.AssemblyReference.cache
+C:\Users\jakub.krajanowski\source\repos\TableTest\obj\Debug\TableTest.csproj.CoreCompileInputs.cache
+C:\Users\jakub.krajanowski\source\repos\TableTest\obj\Debug\TableTest.dll
+C:\Users\jakub.krajanowski\source\repos\TableTest\obj\Debug\TableTest.pdb
