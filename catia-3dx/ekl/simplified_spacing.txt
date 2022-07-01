@@ -1,0 +1,89 @@
+// J. Kaleta 2022-01-02
+// NX comparison - Manufacturing 2022
+// EKL Catia 3DEXPERIENCE Language  
+
+Let x, y, z, a (Real) //KP1
+Let p, origin (Point)
+let sha, myShape (Feature)
+Let d, po, wpis (Boolean)
+Let i, j, iloscTypowPianek, iloscAkcesoriow, iloscWierszy, iloscKolumn (Integer)
+Let t, cl, clStr , name, surname, str1, sum  (String)
+Let sh (DTSheetType)
+let dt (DesignTableType)
+let root (VPMReference)
+let lErrors, configcl, clx, naglowki, akcesoriaList, iloscAkcesoriowList, res, listSurf (list)
+Let rst (Wireframe) //KP2
+let s, r, rs, f (surface)
+let l (line)
+Let myPocketShow, myPocketAngle, myPocketType, myPocketPosition  (AdvisorParameterSet)
+
+root = GetEditorRoots("VPMReference").GetItem(1)
+myShape = System.Owner //Owner dowolnego geosetu bezposrednio pod shapem
+sha = GetRootUI() //aktywny obiekt
+Sys\Krok1Show1Size = 0
+
+l = line(point(0mm, 0mm, 0mm), point(0mm, 0mm, 0mm + 1mm))
+
+res = FoteleBaza  ->Query("Surface", "") //resource
+
+if(sha.Name ==myShape.Name){ //shape musi byc aktywny ze wzgledu na adnotacje
+	dt = sha -> Find("DesignTableType", "", true)
+	if(dt <> NULL){
+		
+		if(dt-> Query("DTSheetType", "").Size() == 1){
+			
+			sh = dt-> Find("DTSheetType", "",true)						
+			
+			iloscWierszy = 1 //glowna petla
+			t =sh  -> CellAsString(1,1) // sprawdza czy koniec tablicy
+			for iloscWierszy while t <> "" {
+				
+				name = "Rzad" + ceil(iloscWierszy/4) //nazewnictwo
+				if(mod(iloscWierszy,4) == 1 or mod(iloscWierszy,4) == 2){
+					surname = " Lewa" //5 znakow
+				}
+				else{
+					surname = "Prawa"
+				}
+				x = sh  -> CellAsReal(iloscWierszy, 1) //sczytuje wspolrzedne i wlasciwosci
+				y = sh  -> CellAsReal(iloscWierszy, 2)
+				z = sh  -> CellAsReal(iloscWierszy, 3)
+				d = sh  -> CellAsBoolean(iloscWierszy, 4)
+				a = sh -> CellAsReal(iloscWierszy, 5)
+				
+				x = x/1000
+				y = y/1000
+				z = z/1000
+				
+				if(d == true){ //wstawia punkty z tabeli
+					if(a == 0){
+						f = CreateOrModifyDatum("Surface", System\Pomocnicze, Sys\porownanieNX\List.36, 0)
+						set f = translate(res.GetItem(1), direction(x,y,z), sqrt(x*x + y*y +z*z))
+						f.Name = name + surname
+					}
+					else{
+						f = CreateOrModifyDatum("Surface", System\Pomocnicze, Sys\porownanieNX\List.36, 0)
+						set f = translate(rotate(res.GetItem(1), l, 180 deg), direction(x,y,z), sqrt(x*x + y*y +z*z))
+						f.Name = name + surname
+					}
+				}								
+				
+				t = sh  -> CellAsString(iloscWierszy+1,1)
+			}//koniec whila t <> ""						
+		}
+		else if(dt-> Query("DTSheetType", "").Size() == 0){
+			Message("W DesignTable nie ma zadnego arkusza")
+		}
+		else{
+			Message("W DesignTable jest wiecej niż jeden arkusz")
+		}
+	}
+	else{
+		Message("W shapie nie ma zadnego DesingTable")
+	}
+}
+else{
+	Message("Prosze aktywowac shape")
+}
+
+

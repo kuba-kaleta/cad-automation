@@ -1,0 +1,4326 @@
+//v8.0 - automatic seat spacing in Catia 3DEXPERIENCE EKL
+
+//KP1Driver
+//uruchamiany z Krok 1, uruchamia KP1
+
+Let geoDest, geoItem (Feature)
+Let delList, geoList (list)
+
+Set geoDest = System\FoteleBazaJoin
+geoList = geoDest.Query("Feature", "")
+if (geoList.Size() > 0){
+	for geoItem inside geoList{
+		geoItem.Delete()
+	}
+}
+System\FoteleBazaJoin .Update()
+
+Set geoDest = System\PunktyFotel
+geoList = geoDest.Query("Feature", "")
+if (geoList.Size() > 0){
+	for geoItem inside geoList{
+		geoItem.Delete()
+	}
+}
+System\PunktyFotel .Update()
+
+System\Empty\Point1234567890.Activity = false //update
+System\Empty\Point1234567890.Activity = true //update
+Sys\Knowledge1Pattern.Update()
+
+
+// JK 2020-01-30 Krok 1 - Rozstaw foteli (pierwotnie KP1 i KP2)
+// Pattern wykonywany jednokrotnie, przetwarza dane wejsciowe //wywoluje KP3driver
+
+Let x, y, z, a (Real) //KP1
+Let p, origin (Point)
+let sha, myShape (Feature)
+Let d, po, wpis (Boolean)
+Let i, j, iloscTypowPianek, iloscAkcesoriow, iloscWierszy, iloscKolumn (Integer)
+Let t, cl, clStr , name, surname, str1, sum, tIter  (String)
+Let sh (DTSheetType)
+let dt (DesignTableType)
+let root (VPMReference)
+let lErrors, configcl, clx, naglowki, akcesoriaList, iloscAkcesoriowList, res, listSurf (list)
+Let rst (Wireframe) //KP2
+let s, r, rs, surfIter (surface)
+let l (line)
+Let myPocketShow, myPocketAngle, myPocketType, myPocketPosition  (AdvisorParameterSet)
+let szer (LENGTH)
+
+System\Empty\Point1234567890.coord(1) //update patternu - odwolanie sie do dowolnego obiektu pozwala wymuszac update
+
+myPocketShow = Sys\Advanced\Krok1Show1Param //koniecznosc przyporzadkowania wartosci list do parametrow w drzewie od aktualizacji r2020x
+myPocketAngle = Sys\Advanced\Krok1Angle1Param
+myPocketType = Sys\Advanced\Krok1Type1Param
+myPocketPosition = Sys\Advanced\Krok1Position1Param
+
+i = 1
+for i while i <=80{ //hardcoded
+	myPocketShow ->SetAttributeBoolean("BooleanK1SP1." + ToString(i), false) //zerowanie Krok1Show1
+}
+
+root = GetEditorRoots("VPMReference").GetItem(1) //najwyzsze zlozenie
+myShape = System.Owner //Owner dowolnego geosetu bezposrednio pod shapem
+sha = GetRootUI() //aktywny obiekt
+Sys\Krok1Show1Size = 0
+
+l = line(point(0 mm,0 mm,0 mm), point(0 mm, 0 mm, 1 mm)) //pionowa os do obrotu
+res = FoteleBaza  ->Query("Surface", "") //resource
+
+i = 1
+for i while i <= res.Size(){
+	surfIter = res.GetItem(i)
+	szer = 4000mm - distance(surfIter, System\DodatkowePodloga\Lewa) - distance(surfIter, System\DodatkowePodloga\Prawa)
+	if(szer < 500mm){
+		FotelSrodekTylnaLawka = i
+		break
+	}
+}	
+if(sha.Name ==myShape.Name){ //shape musi byc aktywny ze wzgledu na adnotacje
+	dt = sha -> Find("DesignTableType", "", true)
+	if(dt <> NULL){
+		
+		if(dt-> Query("DTSheetType", "").Size() == 1){
+			
+			sh = dt-> Find("DTSheetType", "",true)
+			config.RemoveAll() //automatycznie nadawany numer konfiguracji (fotel + akcesoria)
+			
+			iloscKolumn = 1
+			t =sh  -> CellAsString(0, 1) // sprawdza czy koniec tablicy
+			for iloscKolumn while t<>""{
+				t = sh  -> CellAsString(0, iloscKolumn + 1)
+				naglowki.Append(t)
+			}
+			iloscKolumn = iloscKolumn - 1 //po petli wartosc zostaje o 1 wyzsza niz w rzeczywistosci
+			
+			iloscAkcesoriow = iloscKolumn - 11 //11 pierszych kolumn to kolumny obligatoryjne
+			if iloscKolumn < 11 {
+				Message("Zbyt mala ilosc kolumn w design table")
+				exit	
+			}
+			
+			iloscWierszy = 1 //awaryjna mala petla w celu szbkiego znaleziania ilosci pianek
+			t =sh  -> CellAsString(1,1) // sprawdza czy koniec tablicy
+			for iloscWierszy while t <> "" {			
+				configcl.Append(sh -> CellAsString(iloscWierszy,11))
+				t = sh  -> CellAsString(iloscWierszy+1,1)
+			}
+			configcl.RemoveDuplicates()
+			iloscTypowPianek = configcl.Size()
+			
+			iloscWierszy = 1 //glowna petla
+			t =sh  -> CellAsString(1,1) // sprawdza czy koniec tablicy
+			for iloscWierszy while t <> "" {
+				
+				name = "Rzad" + ceil(iloscWierszy/4) //nazewnictwo
+				if(mod(iloscWierszy,4) == 1 or mod(iloscWierszy,4) == 2){
+					surname = " Lewa" //5 znakow
+				}
+				else{
+					surname = "Prawa"
+				}
+				x = sh  -> CellAsReal(iloscWierszy, 1) //sczytuje wspolrzedne i wlasciwosci
+				y = sh  -> CellAsReal(iloscWierszy, 2)
+				z = sh  -> CellAsReal(iloscWierszy, 3)
+				d = sh  -> CellAsBoolean(iloscWierszy, 4)
+				a = sh -> CellAsReal(iloscWierszy, 5)
+				po = sh -> CellAsBoolean(iloscWierszy, 8) //Krok1Position1 - kolumna 8 w tabeli, okresla czy wykonywac pomiary i ustawiac fotel na wartosci globalne
+				cl = sh -> CellAsString(iloscWierszy, 11)
+				
+				i = 12
+				akcesoriaList.RemoveAll()
+				iloscAkcesoriowList.RemoveAll()
+				for i while i <= iloscKolumn{
+					akcesoriaList.Append(sh ->CellAsString(iloscWierszy, i)) //ilosc elementow odpowiada liczbie akcesoriow, przechowuje wartosci dla danego wiersza
+					iloscAkcesoriowList.Append(0) //indeksy odpowiadaja liscie wyzej, lista bedzie sumowala ilosc jedynek w danej kolumnie
+				}
+				
+				if(d == true){ //wstawia punkty z tabeli
+					p = CreateOrModifyDatum("Point", System\PunktyFotel , Sys\Knowledge1Pattern\PunktyFotel, 0)
+					p = point(x/1000, y/1000, z/1000)//wspolrzedne w metrach
+					p.Name = name + surname
+					Sys\Krok1Show1Size = Sys\Krok1Show1Size + 1
+					myPocketShow ->SetAttributeBoolean("BooleanK1SP1." + ToString(iloscWierszy), true)
+				}
+				else{ //Wypelnia liste dla zachowania kolejnosci
+					origin = CreateOrModifyDatum("Point", System\PunktyFotel , Sys\Knowledge1Pattern\PunktyFotel, 0)
+					origin = point(0 mm, 0 mm, 0 mm)
+					Sys\Krok1Show1Size = Sys\Krok1Show1Size + 1
+					myPocketShow ->SetAttributeBoolean("BooleanK1SP1." + ToString(iloscWierszy), false)
+				}
+				myPocketAngle ->SetAttributeReal("RealK1A1P." + ToString(iloscWierszy), a)
+				myPocketPosition ->SetAttributeBoolean("BooleanK1Pos1P." + ToString(iloscWierszy), po)
+				clx.Append(cl) 
+				clx.RemoveDuplicates() //clx zawiera kolejne wystapienia nazw pianek bez powtorzen
+				
+				sum = ""
+				for str1 inside akcesoriaList{
+					sum = sum + str1
+				}
+				
+				wpis = true
+				clStr = cl + sum //string charakteryzujacy cala konfiguracje fotela
+				for tIter inside config{//okreslenie wszystkich uzywanych konfiguracji fotela z tabeli //reuse t, watrosc jest nadpisywana na koncu petli
+					if(clStr == tIter){
+						wpis = false
+						break
+					}
+				}
+				if wpis{
+					config.Append(clStr) //uzywane w KP3 do wybierania odpowiedniej geometrii (tylko size)
+					listSurf.RemoveAll()
+					
+					listSurf.Append(res->GetItem(clx.IndexOf(cl, 1)))
+					i = 1
+					for i while i<=iloscAkcesoriow{
+						if akcesoriaList.GetItem(i) == "1"{
+							if i + iloscTypowPianek <= res.Size(){
+								listSurf.Append(res->GetItem(i + iloscTypowPianek))
+							}
+						}
+					}
+					
+					//Notify("listSurf: ", listSurf)
+					Unset(s) //laczenie geometrii
+					for r inside listSurf{ //laczenie geometrii w gotowe fotele
+						s = assemble(s, r)
+					}
+					rs = CreateOrModifyDatum("surface", System\FoteleBazaJoin , Sys\Knowledge1Pattern\FoteleBazaJoin, 0)
+					rs = s //dodaje do FoteleBazaJoin te ustawione zgodnie z kierunkiem jazdy
+				}
+				myPocketType.SetAttributeInteger("IntegerK1T1P." + iloscWierszy, config->IndexOf(clStr,1)) //uzywane w KP3 do wybierania odpowiedniej geometrii
+				
+				t = sh  -> CellAsString(iloscWierszy+1,1) //jesli wykryje puste pole przerywa petle
+			}//koniec whila t <> ""			
+			
+			if(res.Size() <> clx.Size() + iloscAkcesoriow){ //zabezpieczenie
+				Message("Liczba powierzchni w geosecie FoteleBaza powinna wynosic: ", clx.Size() + iloscAkcesoriow) //po glownej petli clx.Size == iloscTypowPianek
+				i = 1
+				for i while i<= clx.Size(){
+					Notify("pianki: ", clx.GetItem(i))
+				}
+				i = 12
+				for i while i<= naglowki.Size(){
+					Notify("akcesoria: ", naglowki.GetItem(i))
+				}
+			}
+			else{		
+				res = System\FoteleBazaJoin->Query("Surface", "")
+				for s inside res{
+					rst = CreateOrModifyDatum("Surface", System\FoteleBazaJoin, Sys\Knowledge1Pattern\FoteleBazaJoin  , 0)
+					rst = rotate(s, l, 180 deg) //dodaje do FoteleBazaJoin te ustawione niezgodnie z kieurnkiem jazdy
+				}
+				if(Sys\Advanced\Integer.2 == 1){
+					Sys\Advanced\Integer.2  = 0
+				}
+				else{
+					Sys\Advanced\Integer.2 = 1
+				}
+			}
+		}
+		else if(dt-> Query("DTSheetType", "").Size() == 0){
+			Message("W DesignTable nie ma zadnego arkusza")
+		}
+		else{
+			Message("W DesignTable jest wiecej niż jeden arkusz")
+		}
+	}
+	else{
+		Message("W shapie nie ma zadnego DesingTable")
+	}
+}
+else{
+	Message("Prosze aktywowac shape")
+}
+
+doSprawdzenia.RemoveAll()
+System\Empty\Point1234567890.Activity = false //update
+System\Empty\Point1234567890.Activity = true //update
+
+// JK 2020-02-05 KP3Driver
+//wywolywany prze Krok1 //wywoluje KP3
+
+Let geoList, list1, list2 (list)
+Let geoDest, geoItem (Feature)
+let open1, open2 (OpenBodyFeature)
+let i (integer)
+let name (string)
+let root (VPMReference)
+
+root = GetEditorRoots("VPMReference").GetItem(1)
+root.Update()
+
+list1 = Korekta -> Query("OpenBodyFeature", "")
+for open1 inside list1{
+	open1.Delete()	
+}
+for i while i <= Sys\Krok1Show1Size {
+	if(mod(i, 2) == 1){
+		if(Krok1Show1->GetItem(i) == true){
+			name = "Rzad" + ToString(ceil(i/4))
+			if(mod(i,4) == 1){
+				name = name + " Lewa"
+			}
+			else{
+				name = name + "Prawa"
+			}
+			open2 = new("OpenBodyFeature", name, Korekta)
+		}
+	}
+}
+
+list2 = Measure  -> Query("OpenBodyFeature", "")
+for open1 inside list2{
+	open1.Delete()	
+}
+i =1
+for i while i <= Sys\Krok1Show1Size {
+	if(mod(i, 2) == 1){
+		if(Krok1Show1->GetItem(i) == true){
+			name = "Rzad" + ToString(ceil(i/4))
+			if(mod(i,4) == 1){
+				name = name + " Lewa"
+			}
+			else{
+				name = name + "Prawa"
+			}
+			open2 = new("OpenBodyFeature", name, Measure )
+		}
+	}
+}
+
+Set geoDest = System\PunktyFotelNowe
+geoList = geoDest.Query("Feature", "")
+if (geoList.Size() > 0){
+	
+	for geoItem inside geoList{
+		geoItem.Delete()
+	}
+}
+System\PunktyFotelNowe.Update()
+
+Set geoDest = Measure1
+geoList = geoDest.Query("Feature", "")
+if (geoList.Size() > 0){
+	
+	for geoItem inside geoList{
+		geoItem.Delete()
+	}
+}
+Measure1 .Update()
+
+Set geoDest = Fotele
+geoList = geoDest.Query("Feature", "")
+if (geoList.Size() > 0){
+	
+	for geoItem inside geoList{
+		geoItem.Delete()
+	}
+}
+Fotele.Update()
+
+Set geoDest = System\PunktyKorekta1
+geoList = geoDest.Query("Feature", "")
+if (geoList.Size() > 0){
+	
+	for geoItem inside geoList{
+		geoItem.Delete()
+	}
+}
+
+System\Empty\Point1234567890.Activity = false //update
+System\Empty\Point1234567890.Activity = true //update
+Sys\MainKnowlegde3Pattern .Update()
+
+
+
+// JK 2020-04-16 KP3
+//pierwszy rozstaw wraz z pomiarem - warto przepisac na taki schemat jaki jest zastosowany w Kroku 3 - Sprawdzenie
+//Uruchamiany przez KP3driver //uruchamia KESBridge_1
+
+let pl, plOff, yzPlane, plOffH (Plane)
+let p, p1, centerZ, centerX, startZ, StartX, pZero, EndX (Point)
+let li, liPoprz, MeasureZ, MeasureX, liPoprzObn, lineBack, currentLine, liThin, liV, liV2(Line)
+let podloga, sciany, surfIter, surf, g, h, fotel, fotelK, pow, surfPoprz, suPoprz, yzOff, su, suThin, surfCheck1, surfCheck2, surfCheck3, surfCheck4, surfCheck, suPoprzeczna, ext, surfSzer (Surface)
+let i, j, k, shift, shiftTemp, rzadNr, rzadMax (Integer)
+let name, surname, searchStr (string)
+let f (Wireframe)
+let distx, distX, x, z, y, xp1, yp1, zp1, distz, distZ, dx, dz, wys, wpis, distXZ, distTylParam, wysPodl, distTemp, distTemp2, suLewo, suPrawo, powLewo, powLewoDoPrzodu, powPrawo, Rbanki, dzPoprz, len1, distPrzodParam, klasyfIter, dist_tyl_g, xFotelS, yFotelS, zFotelS, szer (LENGTH)
+let int1, int2, int3  (curve)
+let isSet, isNotSetdz, CurrentShift, wysPodlList, isNotSetSort, surfListS (list)
+let root (VPMReference)
+let sha (Feature)
+let dt (DesignTableType)
+let sh (DTSheetType)
+let open1 (OpenBodyFeature)
+let tempReal (Real)
+let ang1 (ANGLE)
+let myList7, myList7Copy, myKorektaList (AdvisorParameterSet)
+let pos (Boolean)
+
+System\Empty\Point1234567890.coord(1) //Update
+
+myList7 = Sys\Advanced\List7Param
+myList7Copy = Sys\Advanced\List7CopyParam
+myKorektaList = Sys\Advanced\KorektaListParam
+
+for surfIter inside Podloga -> Query("Surface" , ""){ //Przygotowanie extractow do pomiarow
+	podloga = assemble(podloga, surfIter)
+}
+
+for surfIter inside Sciany  -> Query("Surface" , ""){
+	sciany = assemble(sciany, surfIter)
+}
+sha = GetRootUI() //tabela do komunikatow
+dt = sha -> Find("DesignTableType", "",true)
+sh = dt-> Find("DTSheetType", "",true)
+dt.Activity = false
+
+i = 1
+for i while i <= Sys\Krok1Show1Size { //czyszczenie komunikatow w design table
+	sh->SetCell(i+1, 9, " ")
+	sh->SetCell(i+1, 10, " ")
+	sh->SetCell(i+2, 9, " ")
+	sh->SetCell(i+2, 10, " ")
+}
+
+i = 1
+for i while i <= Klasyfikacja.Size(){
+	Klasyfikacja.SetItem(0mm, i)
+}
+
+KP3Points .RemoveAll() //przygotowanie list
+isNotSet2 .RemoveAll()
+
+i = 1
+for i while i <= int(ceil(Sys\Krok1Show1Size /2)) { //potrzebne do korekcji (krok 2)
+	
+	myList7->SetAttributeDimension("List7P."+ToString(4*i-3), 0mm, "LENGTH")
+	myList7->SetAttributeDimension("List7P."+ToString(4*i-2), 0mm, "LENGTH")
+	myList7->SetAttributeDimension("List7P."+ToString(4*i-1), WysokoscFotela, "LENGTH")
+	myList7->SetAttributeDimension("List7P."+ToString(4*i), 0 deg, "Angle")
+}
+i = 1
+for i while i <= int(ceil(Sys\Krok1Show1Size /2)) { //potrzebne do korekcji (krok 2)
+	
+	myList7Copy->SetAttributeDimension("List7CopyP."+ToString(4*i-3), 0mm, "LENGTH")
+	myList7Copy->SetAttributeDimension("List7CopyP."+ToString(4*i-2), 0mm, "LENGTH")
+	myList7Copy->SetAttributeDimension("List7CopyP."+ToString(4*i-1), WysokoscFotela, "LENGTH")
+	myList7Copy->SetAttributeDimension("List7CopyP."+ToString(4*i), 0 deg, "Angle")
+}
+i = 1
+for i while i <= int(ceil(Sys\Krok1Show1Size /2)) { //potrzebne do korekcji (krok 2)
+	
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(4*i-3), 0mm, "LENGTH")
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(4*i-2), 0mm, "LENGTH")
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(4*i-1), WysokoscFotela, "LENGTH")
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(4*i), 0 deg, "Angle")
+}
+
+i=1
+for i while i <=Sys\Krok1Show1Size  { //potrzebne do drugiego przejscia
+	isSet.Append(true)
+}
+
+root = GetEditorRoots("VPMReference")->GetItem(1)
+yzPlane = plane(point(0mm,0mm,0mm), point(0mm,10mm,0mm), point(0mm,0mm,10mm))
+
+suLewo = 400mm //su - powierzchnia do mierzenia odleglosci od podlogi
+suPrawo = 800mm
+powLewo = 400mm //pow - powierzchnia do mierzenia odleglosci od sciany
+powLewoDoPrzodu = 450mm
+powPrawo = 800mm
+Rbanki = 100mm //promien obszaru w ktorym lapie surfCheck
+
+distPrzodParam = 750mm //maksymalna odleglosc od sciany z przodu
+distTylParam = 400mm //maksymalna odleglosc od sciany z tylu
+shift = 0
+shiftTemp = 0
+i = 1
+
+for i while i <= Sys\Krok1Show1Size { //pierwsze przejscie - od przodu do tylu
+	if(Krok1Show1 ->GetItem(i) == true){
+		
+		pos = Krok1Position1.GetItem(i)
+		
+		name = "Rzad" + ceil(i/4) //nazewnictwo
+		if(mod(i,4) == 1 or mod(i,4) == 2){
+			surname = " Lewa"
+		}
+		else{
+			surname = "Prawa"
+		}
+		
+		searchStr = "x.Name == " + "\"" + name + surname + "\""
+		open1 = Korekta->Find("OpenBodyFeature", searchStr, true) //geoset do stworzenia kopii geometrii foteli - wejscie w cykl korekcji
+		
+		x = Sys\Knowledge1Pattern\PunktyFotel ->GetItem(i) -> coord(1) //spisanie wspolrzednych wejsciowych
+		y = Sys\Knowledge1Pattern\PunktyFotel ->GetItem(i) -> coord(2)
+		z = Sys\Knowledge1Pattern\PunktyFotel ->GetItem(i) -> coord(3)
+		if (Krok1Angle1 ->GetItem(i) == 0 ){ //fotel zgodnie (z kierunkiem jazdy)
+			
+			surf = System\FoteleBazaJoin -> Query("Surface", "") -> GetItem(Krok1Type1  ->GetItem(i)) //wstawienie geometrii fotela do pomiarow
+			f = translate( surf, direction(x, y, z), sqrt(x*x + y*y + z*z)) //fotel aktualnie ustawiany
+			
+			if(mod(i,2) == 1){
+				
+				//surfCheck = CreateOrModifyDatum("Surface", System\Pomocnicze2  , Sys\MainKnowlegdePattern3\List.9 , 0)
+				surfCheck1 = extrude(extrude(point(x - Rbanki, y, z), direction(0mm,1mm,0mm), suLewo - Rbanki, suPrawo - Rbanki, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true) //4 rownolegle pionowe poprzeczne surfacy
+				surfCheck2 = extrude(extrude(point(x + Rbanki, y, z), direction(0mm,1mm,0mm), suLewo - Rbanki, suPrawo - Rbanki, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true)
+				surfCheck3 = extrude(extrude(point(x + 3*Rbanki, y, z), direction(0mm,1mm,0mm), suLewo - Rbanki, suPrawo - Rbanki, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true)
+				surfCheck4 = extrude(extrude(point(x + 5*Rbanki, y, z), direction(0mm,1mm,0mm), suLewo - Rbanki, suPrawo - Rbanki, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true)
+				surfCheck = assemble( surfCheck1, surfCheck2, surfCheck3, surfCheck4) //narzedzie do sprawdzania obecnosci podlogi
+				
+				liThin =  line(point(x - 100 mm, y, z + 2000 mm), direction(1mm,0mm,0mm), 0 mm, 400 mm, true) //pozioma nad fotelem distz
+				suThin = extrude(liThin, direction(0,1,0), 5 mm, 5 mm, true) //pozioma waska nad fotelem
+				distz = distancedir(suThin, f, direction(0,0,1)) //dystans powierzchni pomiarowej do siedziska
+				
+				li = line(point(x - 2*Rbanki , y, z + 2000 mm), point(x + 6*Rbanki, y, z + 2000 mm)) //pozioma nad fotelem distZ
+				//su = CreateOrModifyDatum("Surface", System\Pomocnicze2  ,Sys\MainKnowlegdePattern3\List.9 , 0) //zmiana powierzchni i pomiar distZ
+				su = extrude(li, direction(0,1,0), suLewo, suPrawo, false) //pozioma szeroka nad fotelem
+				liV = line(point(x + 300mm, y, z + 1000mm), point(x + 300mm, y, z - 1000mm)) //pionowa przed fotelem
+				distXZ = distance(f, liV)
+				//liV = CreateOrModifyDatum("Line", Pomocnicze2 , `Sys\Knowledge Pattern.3\List.9` ,0)
+				liV2 = line(point(x + 300mm - distXZ, y, z + 2000mm), point(x + 300mm - distXZ, y, z - 2000mm))
+				//suPoprzeczna = CreateOrModifyDatum("Surface", Pomocnicze2 , `Sys\Knowledge Pattern&&&\List.9` , 0)
+				suPoprzeczna = extrude(liV2, direction(0mm, 1mm, 0mm), 400mm, 800mm, false)
+				if(distance(liV2, podloga) == 0mm){
+					
+					distZ = distancedir(su, intersect(liV2, podloga), direction(0mm, 0mm, 1mm)) //dystans powierzchni pomiarowej do podlogi	
+				}
+				else if(distance(suPoprzeczna, podloga) == 0mm){
+					
+					int1 = intersect(suPoprzeczna, podloga)
+					//plOffH = CreateOrModifyDatum("Plane", Pomocnicze2 , `Sys\Knowledge Pattern&&&\List.9` , 0)
+					plOffH = planeoffset(System\DodatkowePodloga\Gora ,pointoncurveRatio(int1, point(0mm,0mm,0mm), 0, true))
+					distZ = distancedir(su, plOffH, direction(0mm, 0mm, 1mm))
+					if pos == true{
+						Notify("Podłoga dla rzędu ", ceil(i/4), ", fotela ", mod(i,4), " nie znajduje się w miejscu pomiaru. Może to wpływac na precyzję [0x01]")
+						sh->SetCell(i+1, 9, "Podłoga dla rzędu " + ceil(i/4) + ", Fotel " + mod(i,4) + "nie znajduje się w miejscu pomiaru. Może to wpływać na precyzję [0x01]") //wpis do tablicy gdzie adnotacja zostaje do wgladu
+					}
+				}
+				else if(distance(surfCheck, podloga) < Rbanki){ //wieksza powierzchnia - mniejsza dokladnosc, ale bez bledu
+					distZ = distance(su, near(podloga, point(x,y,z)))
+					if pos == true{
+						Notify("Podłoga dla rzędu ", ceil(i/4), ", fotela ", mod(i,4), " nie znajduje się w miejscu pomiaru. Może to wplywać na precyzję [0x01a]")
+						sh->SetCell(i+1, 9, "Podłoga dla rzędu " + ceil(i/4) + ", Fotel " + mod(i,4) + " nie znajduje się w miejscu pomiaru. Może to wplywać na precyzję [0x01a]")
+					}
+				}
+				else{
+					if pos == true{
+						Message("Nieprawidłowa podłoga: rząd ", ceil(i/4), ", Fotel ", mod(i,4), " nie został przesunięty w osi Z [0x02]")
+						sh->SetCell(i+1, 9, "Nieprawidłowa podłoga: rząd " + ceil(i/4) + ", Fotel " + mod(i,4) + " nie został przesunięty w osi Z [0x02]")
+					}
+					distZ = WysokoscFotela + distz //redukuje sie do zera
+				}
+				wys =  distZ - distz //aktualna wysokosc
+				if pos == true{
+					dz =  wys - WysokoscFotela //korekcja w z
+				}
+				else{
+					dz = 0mm
+				}
+				wysPodl = z + 2000mm - distZ //bezwzgledna wysokosc podlogi
+				z = z - dz
+				
+				//g = CreateOrModifyDatum("Surface", Pomocnicze1, `Sys\Knowledge Pattern&&&\List.9` , 0)
+				set g  = translate(f, direction(0mm, 0mm, -1mm), dz)  //fotel aktualnie ustawiany skorygowany w Z
+				
+				pl = plane(point(x + 300mm, y, z), point(x + 300mm, y, z+50mm), point(x + 300mm, y + 50mm , z)) //Korekcja w X //plane przed fotelem
+				if pos == true {
+					distx = distance(pl, g)
+					
+					//plOff = CreateOrModifyDatum("Plane", Pomocnicze1, `Sys\Knowledge Pattern&&&\List.9` , 0)
+					plOff = plane(point(x + 300mm - distx - 0.01mm, y, z), point(x + 300mm - distx - 0.01mm, y, z+50mm), point(x + 300mm - distx - 0.01mm, y + 50mm , z)) //plane bezposrednio z przodu fotela w kolizji 0.01mm
+					int1 = intersect(plOff, g)
+					//ext = CreateOrModifyDatum("Surface", System\Pomocnicze  , Sys\MainKnowlegdePattern3\List.9 , 0)
+					ext = extrude(int1, direction(1mm, 0mm, 0mm), 0mm, distPrzodParam - distance(int1, planeoffset(yz_plane, point(x,y,z))), true)
+					//pow = CreateOrModifyDatum("Surface", System\Pomocnicze2  , Sys\MainKnowlegdePattern3\List.9, 0)
+				}
+				else{
+					ext = System\Empty\Surface.93746
+				}
+				pow = extrude(line(point(x + 300mm, y + powLewoDoPrzodu, z - 100mm), point(x + 300mm, y - powPrawo, z - 100mm)), direction(0mm,0mm,1mm), 300mm, 500mm, true) //powierzchnia pionowa poprzeczna przed fotelem
+				dist_tyl_g = distance(System\DodatkowePodloga\Tyl , g)
+				lineBack = line(point( -15000mm + dist_tyl_g + 0.01mm, y -660mm, z), point(-15000mm + dist_tyl_g + 0.01mm, y + SzerokoscFotela/2 , z))
+				//yzOff = CreateOrModifyDatum("Surface", System\Pomocnicze   , Sys\MainKnowlegdePattern3\List.9  , 0)
+				yzOff = extrude(lineBack , direction(0mm, 0mm, 1mm), 800mm, 800mm, true) //powierzchnia pionowa poprzeczna za fotelem
+				
+				//surfCheck = CreateOrModifyDatum("Surface", System\Pomocnicze2 , Sys\MainKnowlegdePattern3\List.9  , 0)
+				surfCheck1 = extrude(extrude(point(x, y, z - 3*Rbanki), direction(0mm,1mm,0mm), powLewoDoPrzodu - Rbanki, powPrawo - Rbanki, false), direction(1mm,0mm,0mm), 0mm, distPrzodParam, true) //4 rownolegle pionowe poprzeczne surfacy
+				surfCheck2 = extrude(extrude(point(x, y, z - Rbanki), direction(0mm,1mm,0mm), powLewoDoPrzodu - Rbanki, powPrawo - Rbanki, false), direction(1mm,0mm,0mm), 0mm, distPrzodParam, true)
+				surfCheck3 = extrude(extrude(point(x, y, z + Rbanki), direction(0mm,1mm,0mm), powLewoDoPrzodu - Rbanki, powPrawo - Rbanki, false), direction(1mm,0mm,0mm), 0mm, distPrzodParam, true)
+				surfCheck4 = extrude(extrude(point(x, y, z + 3*Rbanki), direction(0mm,1mm,0mm), powLewoDoPrzodu - Rbanki, powPrawo - Rbanki, false), direction(1mm,0mm,0mm), 0mm, distPrzodParam, true)
+				surfCheck = assemble(surfCheck1, surfCheck2, surfCheck3, surfCheck4) //narzedzie do sprawdzania obecnosci sciany
+				
+				if(distance(ext, sciany) == 0mm and pos == true){ //sciana z przodu
+					
+					Klasyfikacja.SetItem(OdlegloscOdSciany, i) //do Kroku 4 //Liczba elementow listy Klasyfikacja jest stala i wystarczajaco duza (na 24 rzedy). Jej elemnty sa tylko nadpisywane
+					if pos == true {
+						int2 = intersect(ext, sciany)
+						distX = distance(int1, int2) //dystans od fotela do sciany
+						dx = distX - OdlegloscOdSciany
+						
+						//StartX = CreateOrModifyDatum("Point", System\PunktyPomiaryStart, `Sys\Knowledge Pattern&&&\punktyPomiaryX`, 0)
+						set StartX = translate(pointoncurve(int1, point(0mm,0mm,0mm), 0mm, true), direction(1mm,0mm,0mm), dx) //point(pStartX ->coord(1) - dx , pStartX ->coord(2), pStartX ->coord(3))
+						Sys\measure1->Run(StartX, OdlegloscOdSciany, name + surname, i, 1) //tworzy linie pomiarowa	
+					}	
+				}
+				else if(distance(surfCheck, sciany) < Rbanki ){ //sciana z przodu na innej wysokosci - mniejsza dokladnosc, ale bez bledu
+					
+					Klasyfikacja.SetItem(OdlegloscOdSciany, i)
+					if pos == true {
+						if(distance(sciany, g) <> 0mm and distance(sciany, translate(g, direction(0,-1,0), SzerokoscFotela )) <> 0mm){  //jesli nie skoliduje ze sciana
+							distX = distx + distancedir(pow, sciany, direction(1mm,0mm,0mm)) //pow zamiast pl bo krocej trwa pomiar
+							dx = distX - OdlegloscOdSciany
+						}
+						else{ //jesli skoliduje ze sciana
+							distX =  distancedir(pow, sciany, direction(1mm,0mm,0mm)) - distx //pow zamiast pl bo krocej trwa pomiar
+							dx = distX + OdlegloscOdSciany
+							dx = -1*dx
+						}
+						
+						Notify("Ściana dla rzędu ", ceil(i/4), ", fotela ", mod(i,4), " nie znajduje się w miejscu pomiaru. Może to wplywać na precyzję [0x03]")
+						sh->SetCell(i+1, 10, "Ściana dla rzędu "  + ceil(i/4) + ", fotela " + mod(i,4) + " nie znajduje się w miejscu pomiaru. Może to wpływać na precyzję [0x03]")
+						//StartX = CreateOrModifyDatum("Point", System\PunktyPomiaryStart, `Sys\Knowledge Pattern&&&\punktyPomiaryX`, 0)
+						set StartX = translate(pointoncurve(int1, point(0mm,0mm,0mm), 0mm, true), direction(1mm,0mm,0mm), dx) //kreacja linii pomiarowej
+						
+						Sys\measure1->Run(StartX, OdlegloscOdSciany, name + surname, i, 1)
+					}
+				}
+				else if(i > 4 and distance(yzOff, sciany) >= distTylParam){ //pomiar do poprzedniego fotela
+					if(isSet->GetItem(i-4) == true and Krok1Show1->GetItem(i-4) == true){ //sprawdza w ktorym przejsciu ustawic fotel (1 - od przodu to tylu czy 2 - od tylu do przodu)
+						if(Krok1Show1->GetItem(i -2) <> true){ //potrzebne bo gubi numeracje
+							shiftTemp = 1
+						}
+						else{
+							shiftTemp = 0
+						}
+						if(Krok1Show1->GetItem(i -1) <> true){ //potrzebne bo gubi numeracje
+							shiftTemp = shiftTemp + 1
+						}
+						if(Krok1Show1->GetItem(i -3) <> true){ //potrzebne bo gubi numeracje
+							shiftTemp = shiftTemp + 1
+						}
+						xp1 = KP3Points  -> GetItem(i-4-shift+shiftTemp) -> coord(1) //wspolrzedne odniesienia
+						yp1 = KP3Points  -> GetItem(i-4-shift+shiftTemp) -> coord(2)
+						zp1 = KP3Points  -> GetItem(i-4-shift+shiftTemp) -> coord(3)
+						if( Krok1Angle1 ->GetItem(i-4) <> 0 deg){ //fotel zgodnie, odniesienie niezgodnie z kierunkiem jazdy	
+							
+							set h = translate(System\FoteleBazaJoin -> Query("Surface", "")->GetItem(config.Size() + Krok1Type1  ->GetItem(i - 4) ), direction(xp1, yp1, zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1)) //geometria odniesienia
+							if(zp1 > z){
+								dzPoprz = zp1 - dz //dystans o ktory podnosimy liPoprz jesli fotel odniesienia jest wyzej, zeby pozioma linia pomiarowa trafila na oparcie i jak najblizej siedziska
+							}
+							else{
+								dzPoprz = 0mm
+							}
+							liPoprz = line(point(x - 300mm, y + 0.01mm, wysPodl + WysokoscFotela + 10mm + dzPoprz), point(x + 2400mm, y + 0.01mm, wysPodl + WysokoscFotela +10mm + dzPoprz)) //10mm zapasu //+ 0.01mm bo trafia na srodek fotela ze szczelina
+							
+							if(distance(liPoprz, h) == 0mm and distance(liPoprz, g) == 0mm and liPoprz <> NULL){
+								Klasyfikacja.SetItem(OdlegloscSkierowanychDoSiebie, i)
+								if pos == true{
+									//StartX = CreateOrModifyDatum("Point", System\PunktyPomiaryStart, `Sys\Knowledge Pattern&&&\punktyPomiaryX`, 0)
+									StartX = near(intersect(liPoprz , h), System\DodatkowePodloga\Tyl)
+									EndX = near(intersect(liPoprz , g), System\DodatkowePodloga\Przod)
+									distX = distance(StartX, EndX)
+									dx =  distX - OdlegloscSkierowanychDoSiebie
+									Sys\measure1 ->Run(StartX, OdlegloscSkierowanychDoSiebie, name + surname, i, -1)
+								}
+							}
+							else{
+								isSet->SetItem(false, i) //potrzebne do drugiego przejscia
+								isNotSet2 .Append(i) //potrzebne do drugiego przejscia
+								isNotSetdz.Append(dz) //potrzebne do drugiego przejscia
+								wysPodlList.Append(wysPodl) //potrzebne do drugiego przejscia
+								CurrentShift.Append(shift) //potrzebne do drugiego przejscia
+								dx = 0 //brak przesuniecia w x
+							}
+						}
+						else{ //fotel zgodnie, odniesienie zgodnie z kierunkiem jazdy
+							
+							set h = translate( System\FoteleBazaJoin -> Query("Surface", "")->GetItem(Krok1Type1  ->GetItem(i-4) ) , direction(xp1 , yp1, zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1))
+							
+							//liPoprz = CreateOrModifyDatum("Line", System\Pomocnicze, Sys\MainKnowlegdePattern3\List.9  ,0)
+							liPoprz = line(point(x - 300mm, y, wysPodl + 620mm), point(x + 1400mm, y, wysPodl + 620mm ))
+							liPoprzObn = line(point(x - 300mm, y, wysPodl + 540mm), point(x + 1400mm, y, wysPodl + 540mm ))
+							
+							currentLine = NULL
+							if(distance(liPoprz, h) == 0mm and distance(liPoprz, g) == 0mm){
+								currentLine = liPoprz
+							}
+							else if(distance(liPoprzObn, h) == 0mm and distance(liPoprzObn, g) == 0mm){
+								currentLine = liPoprzObn
+							}
+							if(currentLine <> NULL ){ //pos - zmienna dla iveco, dzieki ktorej moza ustawic fotele na wymiary bezposrednio z tabeli puszczajac krok 1 bez powierzchni
+								Klasyfikacja.SetItem(OdlegloscOdPoprzedzajacego, i)
+								if pos == true{
+									//StartX = CreateOrModifyDatum("Point", System\PunktyPomiaryStart, `Sys\Knowledge Pattern&&&\punktyPomiaryX`, 0)
+									StartX = near(intersect(currentLine, h), System\DodatkowePodloga\Tyl)
+									//EndX = CreateOrModifyDatum("Point", System\PunktyPomiaryStart, `Sys\KnowledgePattern&&&\punktyPomiaryX`, 0)
+									EndX = near(intersect(currentLine, g), System\DodatkowePodloga\Przod)
+									StartX.UserInfoComment = DimToString(OdlegloscOdPoprzedzajacego, "mm")
+									distX = distance(StartX, EndX)
+									dx  =  distX - OdlegloscOdPoprzedzajacego
+									Sys\measure1 ->Run(StartX, OdlegloscOdPoprzedzajacego, name + surname, i, -1)
+								}
+							}
+							else{
+								isSet->SetItem(false, i)
+								isNotSet2 .Append(i)
+								isNotSetdz.Append(dz)
+								wysPodlList.Append(wysPodl)
+								CurrentShift.Append(shift)
+								dx = 0
+							}
+						}
+					}
+					else{
+						isSet->SetItem(false, i)
+						isNotSet2  .Append(i)
+						isNotSetdz.Append(dz)
+						wysPodlList.Append(wysPodl)
+						CurrentShift.Append(shift)
+						dx = 0
+					}
+				}
+				else if(distance(yzOff, sciany) < distTylParam ){ //sciana z tylu
+					
+					Klasyfikacja.SetItem(OdlegloscOdScianyTyl, i)
+					
+					if pos == true {
+						
+						if(distance(g, sciany) <> 0mm and distance(translate(g, direction(0,-1,0), SzerokoscFotela ), sciany) <> 0mm){
+							dx = OdlegloscOdScianyTyl - distance(yzOff, sciany)
+						}
+						else{ //jesli skoliduje ze sciana
+							dx = distance(yzOff, sciany) + OdlegloscOdScianyTyl
+						}
+						
+						int3 = intersect(yzOff, g)
+						//StartX = CreateOrModifyDatum("Point", System\PunktyPomiaryStart, `Sys\Knowledge Pattern&&&\punktyPomiaryX`, 0)
+						set StartX = translate(pointoncurve(int3, point(0mm,0mm,0mm), 0mm, true), direction(1mm,0mm,0mm), dx)
+						Sys\measure1 ->Run(StartX, OdlegloscOdScianyTyl, name + surname, i, -1)
+					}
+				}
+				else{
+					isSet->SetItem(false, i)
+					isNotSet2  .Append(i)
+					isNotSetdz.Append(dz)
+					wysPodlList.Append(wysPodl)
+					CurrentShift.Append(shift)
+					dx = 0
+				}
+				x = x + dx
+				
+				fotel = CreateOrModifyDatum("Surface", Fotele , Sys\MainKnowlegde3Pattern\Fotele0, 0)
+				fotel.Name = name + surname
+				if(isSet->GetItem(i) == true){ //przesuwa w X tylko te z pierwszego przejscia
+					set fotel = translate(g, direction(1mm, 0mm, 0mm), dx)
+					
+					if pos == true {
+						startZ = point(x + 300mm - distXZ, y, z + 2000mm - distZ + dz) //Adnotacje w  Z
+						MeasureZ = CreateOrModifyDatum("Line", Measure1, Sys\MainKnowlegde3Pattern\AgroMeasure, 0)
+						MeasureZ.Name = name + surname
+						MeasureZ = line(startZ, point(x + 300mm - distXZ, y, z + 2000mm - distZ + WysokoscFotela + dz))
+						MeasureZ.UserInfoComment = DimToString(WysokoscFotela, "mm")
+						centerZ = pointoncurveRatio(MeasureZ, point(0mm,0mm,0mm), 0.5, true)
+						`Relations\VB Scripts.1\VB Script.1` ->Run(ToString(FormatNumber(WysokoscFotela, "decimal", 4)->ToReal()*1000), centerZ)
+					}
+					fotelK = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\Korekta, 0)
+					fotelK.Name = name + surname
+					set fotelK = translate(g, direction(1mm, 0mm, 0mm), dx)	
+				}								
+			}
+			else{
+				x = KP3Points -> GetItem(i - 1- shift)->coord(1) //wspolrzedne fotela obok
+				y = KP3Points -> GetItem(i - 1- shift)->coord(2) - SzerokoscFotela
+				z = KP3Points -> GetItem(i - 1- shift)->coord(3)
+				
+				fotel = CreateOrModifyDatum("Surface", Fotele , Sys\MainKnowlegde3Pattern\Fotele0 , 0)
+				fotel.Name =name + surname + "R"
+				if(isSet->GetItem(i - 1) == true){
+					set fotel = translate(surf, direction(x,y,z), sqrt(x*x + y*y + z*z) ) //wstawienie fotela obok
+					
+					fotelK = CreateOrModifyDatum("Surface", open1 ,Sys\MainKnowlegde3Pattern\Korekta , 0)
+					fotelK.Name = name + surname + "R"
+					set fotelK = translate(surf, direction(x,y,z), sqrt(x*x + y*y + z*z) ) //korekta - wejscie w cykl
+				}				
+				StartX = point(0mm,0mm,0mm)
+				dx = 0mm
+			}
+		}
+		else{ //fotel niezgodnie (z kierunkiem jazdy)
+			surf = System\FoteleBazaJoin -> Query("Surface", "")->GetItem(config.Size() + Krok1Type1 ->GetItem(i)) //wstawianie fotela do pomiarow
+			f = translate(surf, direction(x , y, z), sqrt(x*x + y*y + z*z))
+			
+			if(mod(i,2) == 1){	
+				//surfCheck = CreateOrModifyDatum("Surface", System\Pomocnicze2 , Sys\MainKnowlegdePattern3\List.9  , 0)
+				surfCheck1 = extrude(extrude(point(x + Rbanki, y, z), direction(0mm,1mm,0mm), suLewo - Rbanki, suPrawo - Rbanki, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true) //4 rownolegle pionowe poprzeczne surfacy
+				surfCheck2 = extrude(extrude(point(x - Rbanki, y, z), direction(0mm,1mm,0mm), suLewo - Rbanki, suPrawo - Rbanki, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true)
+				surfCheck3 = extrude(extrude(point(x - 3*Rbanki, y, z), direction(0mm,1mm,0mm), suLewo - Rbanki, suPrawo - Rbanki, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true)
+				surfCheck4 = extrude(extrude(point(x - 5*Rbanki, y, z), direction(0mm,1mm,0mm), suLewo - Rbanki, suPrawo - Rbanki, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true)
+				surfCheck = assemble(surfCheck1, surfCheck2, surfCheck3, surfCheck4) //narzedzie do sprawdzania obecnosci podlogi
+				
+				liThin = line(point(x + 100 mm, y, z + 2000 mm), point(x - 300mm, y, z + 2000mm))
+				suThin = extrude(liThin, direction(0,1,0), 5 mm, 5 mm, true)
+				distz = distancedir(suThin, f, direction(0,0,1))
+				
+				li = line(point(x + 2*Rbanki, y, z + 2000 mm), point(x - 6*Rbanki, y, z + 2000mm)) //stworzenie powierzchni i pomiar
+				//su = CreateOrModifyDatum("Surface", System\Pomocnicze2  , Sys\MainKnowlegdePattern3\List.9  , 0) //pomiar distZ
+				su = extrude(li, direction(0,1,0), suLewo, suPrawo, false)		
+				liV = line(point(x - 300mm, y, z + 1000mm), point(x - 300mm, y, z - 1000mm))
+				distXZ = distance(f, liV)
+				//liV = CreateOrModifyDatum("Line", Pomocnicze2 , `Sys\Knowledge Pattern.3\List.9` ,0)
+				liV2 = line(point(x - 300mm + distXZ, y, z + 1000mm), point(x - 300mm + distXZ, y, z - 1000mm))
+				//suPoprzeczna = CreateOrModifyDatum("Surface", Pomocnicze2 , `Sys\Knowledge Pattern&&&\List.9` , 0)
+				suPoprzeczna = extrude(liV2, direction(0mm, 1mm, 0mm), 400mm, 800mm, false)
+				if(distance(liV2, podloga) == 0mm){
+					distZ = distancedir(su, intersect(liV2, podloga), direction(0mm, 0mm, 1mm))
+				}
+				else if(distance(suPoprzeczna, podloga) == 0mm){
+					int1 = intersect(suPoprzeczna, podloga)
+					plOffH = planeoffset( System\DodatkowePodloga\Gora, pointoncurveRatio(int1, point(0mm,0mm,0mm), 0, true))
+					distZ = distancedir(su, plOffH, direction(0mm, 0mm, 1mm))
+					if pos == true {
+						Notify("Podłoga dla rzędu ", ceil(i/4), ", fotela ", mod(i,4), " nie znajduje się w miejscu pomiaru. Może to wpływać na precyzję [0x04]")
+						sh->SetCell(i+1, 9, "Podłoga dla rzędu " + ceil(i/4) + ", Fotel " + mod(i,4) + " nie znajduje się w miejscu pomiaru. Może to wplywać na precyzję [0x04]")
+					}
+				}
+				else if(distance(surfCheck, podloga) < Rbanki){
+					distZ = distance(su, near(podloga, point(x,y,z)))
+					if pos == true {
+						Notify("Podłoga dla rzędu ", ceil(i/4), ", fotela ", mod(i,4), " nie znajduje się w miejscu pomiaru. Może to wpływać na precyzję [0x04a]")
+						sh->SetCell(i+1, 9, "Podloga dla rzedu " + ceil(i/4) + ", fotela " + mod(i,4) + " nie znajduje sie w miejscu pomiaru. Moze to wplywac na precyzje [0x04a]")
+					}
+				}
+				else{
+					if pos == true {
+						Message("Nieprawidłowa podłoga: rząd ", ceil(i/4), ", Fotel ", mod(i,4), " nie został przesunięty w osi Z [0x05]" )
+						sh->SetCell(i+1, 9, "Nieprawidłowa podłoga: rząd " + ceil(i/4) + ", Fotel " + mod(i,4) + " nie został przesunięty w osi Z [0x05]")
+					}
+					distZ = WysokoscFotela + distz
+				}
+				wys =  distZ - distz
+				if pos == true{
+					dz =  wys - WysokoscFotela
+				}
+				else{
+					dz = 0mm
+				}
+				
+				wysPodl = z + 2000mm - distZ
+				z = z - dz
+				
+				//g = CreateOrModifyDatum("Surface", Pomocnicze1, `Sys\Knowledge Pattern&&&\List.9` , 0)
+				set g  = translate(f, direction(0mm, 0mm, -1mm), dz) //Korekcja w X
+				
+				pl = plane(point(x - 300mm, y, z), point(x - 300mm, y, z+50mm), point(x - 300mm, y + 50mm , z))
+				if pos == true {
+					distx = distance(pl, g)
+					
+					//plOff = CreateOrModifyDatum("Curve", Pomocnicze1, `Sys\Knowledge Pattern&&&\List.9` , 0)
+					plOff = plane(point(x - 300mm + distx + 0.01mm, y ,z), point(x - 300mm + distx + 0.01mm, y, z+50mm), point(x - 300mm + distx + 0.01mm, y + 50mm , z))
+					int1 = intersect(plOff, g)
+					ext = extrude(int1, direction(1mm, 0mm, 0mm), 0mm, distPrzodParam - distance(int1, planeoffset(yz_plane, point(x,y,z))), false)
+					//pow = CreateOrModifyDatum("Surface", System\Pomocnicze2  , Sys\MainKnowlegdePattern3\List.9 , 0)
+				}
+				else{
+					ext = System\Empty\Surface.93746
+				}
+				pow = extrude(line(point(x - 300mm, y + powLewo, z ), point(x - 300mm, y - powPrawo, z )), direction(0mm,0mm,1mm), 400mm, 400mm, true)
+				dist_tyl_g = distance(System\DodatkowePodloga\Przod, g)
+				lineBack = line(point(-dist_tyl_g + 3000mm - 0.01mm, y - 660mm, z), point(-dist_tyl_g + 3000mm - 0.01mm , y + SzerokoscFotela/2 , z))
+				//yzOff = CreateOrModifyDatum("Surface", System\Pomocnicze2  , Sys\MainKnowlegdePattern3\List.9  , 0)
+				yzOff = extrude(lineBack , direction(0mm, 0mm, 1mm), 800mm, 800mm, true)
+				
+				//surfCheck = CreateOrModifyDatum("Surface", System\Pomocnicze2  , Sys\MainKnowlegdePattern3\List.9  , 0)
+				surfCheck1 = extrude(extrude(point(x, y, z - 3*Rbanki), direction(0mm,1mm,0mm), powLewo - Rbanki, powPrawo - Rbanki, false), direction(1mm,0mm,0mm), 0mm, distPrzodParam, false) //4 rownolegle pionowe poprzeczne surfacy
+				surfCheck2 = extrude(extrude(point(x, y, z - Rbanki), direction(0mm,1mm,0mm), powLewo - Rbanki, powPrawo - Rbanki, false), direction(1mm,0mm,0mm), 0mm, distPrzodParam, false)
+				surfCheck3 = extrude(extrude(point(x, y, z + Rbanki), direction(0mm,1mm,0mm), powLewo - Rbanki, powPrawo - Rbanki, false), direction(1mm,0mm,0mm), 0mm, distPrzodParam, false)
+				surfCheck4 = extrude(extrude(point(x, y, z + 3*Rbanki), direction(0mm,1mm,0mm), powLewo - Rbanki, powPrawo - Rbanki, false), direction(1mm,0mm,0mm), 0mm, distPrzodParam, false)
+				surfCheck = assemble( surfCheck1, surfCheck2, surfCheck3, surfCheck4) //narzedzie do sprawdzania obecnosci sciany
+				
+				if(distance(ext, sciany) == 0mm and pos == true){ //sciana z przodu
+					Klasyfikacja.SetItem(OdlegloscOdSciany, i)
+					if pos == true {
+						int2 = intersect(ext, sciany)
+						distX = distance(int1, int2)
+						dx = OdlegloscOdSciany - distX
+						wpis = OdlegloscOdSciany
+						
+						//StartX = CreateOrModifyDatum("Point", System\PunktyPomiaryStart, `Sys\Knowledge Pattern&&&\punktyPomiaryX`, 0)
+						set StartX = translate(pointoncurve(int1, point(0mm,0mm,0mm), 0mm, true), direction(1mm,0mm,0mm), dx)
+						Sys\measure1 ->Run(StartX, OdlegloscOdSciany , name + surname, i, -1)	
+					}
+				}
+				else if(distance(surfCheck, sciany) < Rbanki){ //sciana z przodu na innej wysokosci
+					
+					Klasyfikacja.SetItem(OdlegloscOdSciany , i)
+					if pos == true {
+						if(distance(g, sciany) <> 0mm and distance(sciany, translate(g, direction(0,-1,0), SzerokoscFotela )) <> 0mm){
+							distX = distx + distancedir(pow, sciany, direction(1mm,0mm,0mm))
+							dx = OdlegloscOdSciany - distX
+						}
+						else{ //jesli skoliduje ze sciana
+							distX = distancedir(pow, sciany, direction(1mm,0mm,0mm)) - distx
+							dx = OdlegloscOdSciany + distX
+						}
+						
+						Notify("Ściana dla rzędu ", ceil(i/4), ", fotela ", mod(i,4), " nie znajduje się w miejscu pomiaru. Może to wpływac na precyzję [0x06]")
+						sh->SetCell(i+1, 10, "Ściana dla rzedu " + ceil(i/4) + ", fotela " + mod(i,4) + " nie znajduje się w miejscu pomiaru. Może to wpływać na precyzję [0x06]")
+						
+						//StartX = CreateOrModifyDatum("Point", System\PunktyPomiaryStart, `Sys\Knowledge Pattern&&&\punktyPomiaryX`, 0)
+						set StartX = translate(pointoncurve(int1, point(0mm,0mm,0mm), 0mm, true), direction(1mm,0mm,0mm), dx)
+						Sys\measure1 ->Run(StartX, OdlegloscOdSciany , name + surname, i, -1)
+					}
+				}
+				else if(i >4 and distance(yzOff, sciany) >= distTylParam){
+					if(isSet->GetItem(i-4) == true and Krok1Show1->GetItem(i - 4) == true){ //jest widoczny punkt fotela (odniesienia)
+						if(Krok1Show1->GetItem(i - 2) <> true){
+							shiftTemp = 1 //potrzbne bo gubi numeracje gdy ktorys z foteli obok jest kryty
+						}
+						else{
+							shiftTemp = 0
+						}
+						if(Krok1Show1->GetItem(i -1) <> true){
+							shiftTemp = shiftTemp + 1
+						}
+						if(Krok1Show1->GetItem(i -3) <> true){
+							shiftTemp = shiftTemp + 1
+						}
+						xp1 = KP3Points   -> GetItem(i - 4-shift+shiftTemp) -> coord(1) //wspolrzedne odniesienia
+						yp1 = KP3Points  -> GetItem(i - 4-shift+shiftTemp) -> coord(2)
+						zp1 = KP3Points   -> GetItem(i - 4-shift+shiftTemp) -> coord(3)
+						if(Krok1Angle1 ->GetItem(i - 4) <> 0 deg){ //fotel niezgodnie, odniesienie niezgodnie z kierunkiem jazdy
+							
+							set h = translate(  System\FoteleBazaJoin -> Query("Surface", "")->GetItem(config.Size() + Krok1Type1 ->GetItem(i - 4) ) , direction(xp1, yp1, zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1))
+							liPoprz = line(point(x - 300mm, y, wysPodl + 620mm), point(x + 1400mm, y, wysPodl + 620mm))
+							liPoprzObn = line(point(x - 300mm, y, wysPodl + 540mm), point(x + 1400mm, y, wysPodl + 540mm))
+							
+							currentLine = NULL
+							if(distance(liPoprz, h) == 0mm and distance(liPoprz, g) == 0mm){
+								currentLine = liPoprz
+							}
+							else if(distance(liPoprzObn, h) == 0mm and distance(liPoprzObn, g) == 0mm){
+								currentLine = liPoprzObn
+							}
+							if(currentLine <> NULL and pos == true){
+								Klasyfikacja.SetItem(OdlegloscOdPoprzedzajacego, i)
+								if pos == true {
+									//StartX = CreateOrModifyDatum("Point", System\PunktyPomiaryStart, `Sys\Knowledge Pattern&&&\punktyPomiaryX`, 0)
+									StartX = near(intersect(currentLine, h)  , System\DodatkowePodloga\Tyl )
+									EndX = near(intersect(currentLine, g)  , System\DodatkowePodloga\Przod )
+									distX = distance(StartX, EndX)
+									dx = distX - OdlegloscOdPoprzedzajacego
+									Sys\measure1 ->Run(StartX, OdlegloscOdPoprzedzajacego , name + surname, i, 1)
+								}								
+							}
+							else{
+								isSet->SetItem(false, i)
+								isNotSet2  .Append(i)
+								isNotSetdz.Append(dz)
+								wysPodlList.Append(wysPodl)
+								CurrentShift.Append(shift)
+								dx = 0
+							}
+						}
+						else{ //fotel niezgodnie, odniesienie zgodnie z kierunkiem jazdy
+							
+							isSet->SetItem(false, i)
+							isNotSet2 .Append(i)
+							isNotSetdz.Append(dz)
+							wysPodlList.Append(wysPodl)
+							CurrentShift.Append(shift)
+							dx = 0
+						}
+					}
+					else{
+						isSet->SetItem(false, i)
+						isNotSet2 .Append(i)
+						isNotSetdz.Append(dz)
+						wysPodlList.Append(wysPodl)
+						CurrentShift.Append(shift)
+						dx = 0
+					}
+				}
+				else if(distance(yzOff, sciany) < distTylParam){ //sciana z tylu
+					Klasyfikacja.SetItem(OdlegloscOdScianyTyl, i)
+					if pos == true {
+						if(distance(g, sciany) <> 0mm and distance(translate(g, direction(0,-1,0), SzerokoscFotela ), sciany) <> 0mm){
+							dx =  distance(yzOff, sciany) - OdlegloscOdScianyTyl
+						}
+						else{ //jesli skoliduje ze sciana
+							dx = distance(yzOff, sciany)  + OdlegloscOdScianyTyl
+							dx = -1*dx
+						}
+						
+						int3 = intersect(yzOff, g)
+						//StartX = CreateOrModifyDatum("Point", System\PunktyPomiaryStart, `Sys\Knowledge Pattern&&&\punktyPomiaryX`, 0)
+						set StartX = translate(pointoncurve(int3, point(0mm,0mm,0mm), 0mm, true), direction(1mm,0mm,0mm), dx)
+						Sys\measure1 ->Run(StartX, OdlegloscOdScianyTyl, name + surname, i, 1)
+					}
+				}
+				else{
+					isSet->SetItem(false, i)
+					isNotSet2 .Append(i)
+					isNotSetdz.Append(dz)
+					wysPodlList.Append(wysPodl)
+					CurrentShift.Append(shift)
+					dx = 0
+				}
+				x = x + dx
+				
+				fotel = CreateOrModifyDatum("Surface", Fotele , Sys\MainKnowlegde3Pattern\Fotele0 , 0)
+				fotel.Name = name + surname
+				if(isSet->GetItem(i) == true){
+					set fotel = translate(g, direction(1mm, 0mm, 0mm), dx)
+					if pos == true {
+						startZ = point(x - 300mm + distXZ, y, z + 2000mm - distZ + dz) //Adnotacje w  Z
+						MeasureZ = CreateOrModifyDatum("Line", Measure1  , Sys\MainKnowlegde3Pattern\AgroMeasure , 0)
+						MeasureZ.Name = name + surname
+						MeasureZ = line(startZ, point(x - 300mm + distXZ, y, z + 2000mm - distZ + WysokoscFotela + dz))
+						MeasureZ.UserInfoComment = DimToString(WysokoscFotela,"mm")
+						centerZ = pointoncurveRatio(MeasureZ, startZ, 0.5 , true)
+						`Relations\VB Scripts.1\VB Script.1`  ->Run(ToString((FormatNumber(WysokoscFotela, "decimal", 4)->ToReal())*1000), centerZ)
+					}
+					fotelK = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\Korekta , 0) //fotel korekta - wejscie w cykl
+					fotelK.Name = name + surname
+					set fotelK = translate(g, direction(1mm, 0mm, 0mm), dx)
+				}
+			}
+			else{
+				x = KP3Points -> GetItem(i - 1- shift)->coord(1)
+				y = KP3Points -> GetItem(i - 1- shift)->coord(2) - SzerokoscFotela
+				z = KP3Points -> GetItem(i - 1- shift)->coord(3)
+				
+				fotel = CreateOrModifyDatum("Surface", Fotele , Sys\MainKnowlegde3Pattern\Fotele0, 0)
+				fotel.Name = name + surname + "R"
+				if(isSet->GetItem(i - 1) == true){
+					set fotel = translate(surf, direction(x,y,z), sqrt(x*x + y*y + z*z))
+					
+					fotelK = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\Korekta, 0)
+					fotelK.Name = name + surname + "R"
+					set fotelK = translate(surf, direction(x,y,z), sqrt(x*x + y*y + z*z))
+				}				
+			}
+		}
+		
+		p = CreateOrModifyDatum("point", System\PunktyFotelNowe , Sys\MainKnowlegde3Pattern\PunktyFotelNowe, 0)
+		p = point(x, y, z) //punkt wyjsciowy
+		p.Name = name + surname
+		KP3Points.Append(p)
+		
+		`Relations\VB Scripts.1\VB Script.1` ->Run(name, p) //adnotacja z numerem rzedu
+	}
+	else{
+		shift = shift + 1 //jesli show == false	
+	}
+}
+
+if(KP3Points.Size() > 0){
+	p = KP3Points.GetItem(KP3Points.Size())
+}
+if(p <> NULL){
+	rzadMax = ReplaceSubText(ReplaceSubText(ReplaceSubText(p.Name , "Rzad", ""), " Lewa", ""), "Prawa", "")->ToReal() //pozostawienie samej liczby z nazwy ostatniego widocznego punktu
+}
+shiftTemp = 0
+
+if(isNotSet2 .Size() > 0){ //drugie przejscie - od tylu do przodu
+	isNotSetSort  =isNotSet2    ->Sort(">","Integer","Integer","y = x") //odwrocenie kolejnosci list
+	if(CurrentShift.Size() > 0){
+		CurrentShift = CurrentShift -> Sort(">","Integer","Integer","y = x")
+	}
+	
+	let Temp (list)
+	Temp = Copy(isNotSetdz)
+	i = 1
+	for i while i <= Temp .Size(){
+		isNotSetdz->SetItem(Temp->GetItem(Temp .Size() - i + 1), i)
+	}
+	
+	Temp = Copy(wysPodlList)
+	i = 1
+	for i while i <= Temp .Size(){
+		wysPodlList->SetItem(Temp->GetItem(Temp .Size() - i + 1), i)
+	}
+	
+	k = 1 //zmienna do odczytywania list zapisanych przy pierwszym przejsciu
+	for i inside isNotSetSort  {
+		
+		pos = Krok1Position1.GetItem(i)
+		dx = 0mm
+		
+		x = Sys\Knowledge1Pattern\PunktyFotel ->GetItem(i) -> coord(1) //spisanie wspolrzednych wejsciowych
+		y = Sys\Knowledge1Pattern\PunktyFotel ->GetItem(i) -> coord(2)
+		z = Sys\Knowledge1Pattern\PunktyFotel ->GetItem(i) -> coord(3)
+		
+		p = Sys\Knowledge1Pattern\PunktyFotel .GetItem(i)
+		rzadNr = ReplaceSubText(ReplaceSubText(ReplaceSubText(p.Name , "Rzad", ""), " Lewa", ""), "Prawa", "")->ToReal() //pozostawienie samej liczby
+		if(Krok1Show1->GetItem(i + 2) <> true){
+			shiftTemp = 1 //potrzbne bo gubi numeracje gdy ktorys z foteli obok jest kryty
+		}
+		else{
+			shiftTemp = 0
+		}
+		if(Krok1Show1->GetItem(i + 1) <> true){
+			shiftTemp = shiftTemp + 1
+		}
+		if(Krok1Show1->GetItem(i + 3) <> true){
+			shiftTemp = shiftTemp + 1
+		}
+		
+		if(rzadNr < rzadMax and i + 4 - CurrentShift->GetItem(k) - shiftTemp <= KP3Points.Size() ){ //jesli nie jest ostatnim widocznym rzedem i nie przekracza KP3
+			
+			name = "Rzad" + ceil(i/4) //nazewnictwo
+			if(mod(i,4) == 1 or mod(i,4) == 2){
+				surname = " Lewa"
+			}
+			else{
+				surname = "Prawa"
+			}
+			
+			searchStr = "x.Name == " + "\"" + name + surname + "\""
+			open1 = Korekta->Find("OpenBodyFeature", searchStr, true) //geoset do stworzenia kopii geometrii foteli - wejscie w cykl korekcji
+			
+			if (Krok1Angle1 ->GetItem(i) == 0 ){ //fotel zgodnie
+				
+				dz = isNotSetdz->GetItem(k)
+				z = z - dz
+				
+				xp1 = KP3Points -> GetItem(i + 4 - CurrentShift->GetItem(k) - shiftTemp)->coord(1)
+				yp1 = KP3Points -> GetItem(i + 4 - CurrentShift->GetItem(k) - shiftTemp)->coord(2)
+				zp1 = KP3Points -> GetItem(i + 4 - CurrentShift->GetItem(k) - shiftTemp)->coord(3)
+				
+				surf = System\FoteleBazaJoin -> Query("surface", "")->GetItem(Krok1Type1 ->GetItem(i)) //Konfiguracja fotela
+				set g  = translate(surf, direction(x , y, z), sqrt(x*x + y*y + z*z))
+				if(Krok1Angle1 ->GetItem(i+4) <> 0 deg){ //fotel zgodnie, odniesienie niezgodnie z kierunkiem jazdy
+					
+					set h = translate(System\FoteleBazaJoin -> Query("surface", "")->GetItem(config.Size() + Krok1Type1 ->GetItem(i + 4) ) , direction(xp1, yp1, zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1)) //h = `Relations\Knowledge Pattern.3\Fotele0` ->GetItem(i-4-shift+shiftTemp - 2*isNotSet.Size())
+					wysPodl = wysPodlList->GetItem(k)
+					liPoprz = line(point(x + 400mm, y, wysPodl  + 620mm), point(x - 2400mm, y, wysPodl + 620mm))
+					suPoprz = extrude(liPoprz, direction(0mm, 0mm,1mm), 40mm, 40mm, true)
+					
+					if(distance(suPoprz, h) == 0mm and pos == true){ //jest fotel
+						Notify("Fotele tylem, nie przesunieto [0x07]")
+						sh->SetCell(i+1, 10, "Fotele tylem, nie przesunieto [0x07]")
+						dx = 0
+						//Klasyfikacja.SetItem(0mm, i) //do Action.4 (Check)
+					}
+					else{ //nie ma fotela
+						if pos == true {
+							Message("Brak sciany i fotela poprzedzajacego: rzad ", ceil(i/4), ". Fotel ", mod(i,4), " nie zostal przesuniety w osi X. [0x08]")
+							//Klasyfikacja.SetItem(0mm, i) //do Action.4 (Check)
+						}
+						else{
+							Notify("Rzad ", ceil(i/4), surname, " nie zostal sklasyfikowany [0x0d]")
+						}
+						sh->SetCell(i+1, 10, "Brak sciany i fotela poprzedzajacego: rzad " + ceil(i/4) + ". Fotel " + mod(i,4) + " nie zostal przesuniety w osi X. [0x08]")
+						//pZero = CreateOrModifyDatum( "Point", Pomocnicze1, `Sys\Knowledge Pattern&&&\StartX`, 0)
+						pZero = point(0mm,0mm,0mm)
+						dx = 0
+					}
+				}
+				else{ //fotel zgodnie, odniesienie zgodnie z kierunkiem jazdy
+					
+					set h = translate(  System\FoteleBazaJoin -> Query("surface", "")->GetItem(Krok1Type1 ->GetItem(i+4) ) , direction(xp1 , yp1, zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1))
+					wysPodl = wysPodlList->GetItem(k)
+					liPoprz = line(point(x + 2400mm, y, wysPodl + 620mm), point(x - 2400mm,y,  wysPodl + 620mm))
+					//liPoprzObn = CreateOrModifyDatum("Line", Pomocnicze2 , `Sys\Knowledge Pattern&&&\List.9` ,0)
+					liPoprzObn = line(point(x + 2400mm, y, wysPodl + 540mm), point(x - 2400mm, y, wysPodl + 540mm))
+					
+					currentLine = NULL
+					if(distance(liPoprz, h) == 0mm and distance(liPoprz, g) == 0mm){
+						currentLine = liPoprz
+					}
+					else if(distance(liPoprzObn, h) == 0mm and distance(liPoprzObn, g) == 0mm){
+						currentLine = liPoprzObn
+					}
+					if(currentLine <> NULL ){
+						Klasyfikacja.SetItem(OdlegloscOdPoprzedzajacego, i ) //do Action.4 (Check)
+						if pos == true {
+							StartX = near(intersect(currentLine , h), System\DodatkowePodloga\Przod )
+							EndX = near(intersect(currentLine , g), System\DodatkowePodloga\Tyl )
+							distX = distance(StartX, EndX)
+							dx = distX - OdlegloscOdPoprzedzajacego
+							
+							MeasureX = CreateOrModifyDatum("Line", Measure1, Sys\MainKnowlegde3Pattern\AgroMeasure ,0)
+							MeasureX.Name = name + surname
+							MeasureX = line(StartX,  point(StartX ->coord(1) + OdlegloscOdPoprzedzajacego  , StartX ->coord(2), StartX ->coord(3)))
+							MeasureX.UserInfoComment = DimToString(OdlegloscOdPoprzedzajacego, "mm")
+							centerX = pointoncurveRatio(MeasureX, StartX, 0.5 , true)
+							`Relations\VB Scripts.1\VB Script.1`  ->Run(ToString((FormatNumber(OdlegloscOdPoprzedzajacego, "decimal", 4)->ToReal())*1000), centerX)
+							myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2))), OdlegloscOdPoprzedzajacego, "LENGTH")
+						}
+					}
+					else{
+						if pos == true{
+							Message("Brak sciany i fotela poprzedzajacego: rzad ", ceil(i/4), ". Fotel ", mod(i,4), " nie zostal przesuniety w osi X. [0x09]")
+							//Klasyfikacja.SetItem(0mm, i ) //do Action.4 (Check)
+						}
+						else{
+							Notify("Rzad ", ceil(i/4), surname, " nie zostal sklasyfikowany [0x0d]")
+						}
+						sh->SetCell(i+1, 10, "Brak sciany i fotela poprzedzajacego: rzad " + ceil(i/4) + ". Fotel " + mod(i,4) + " nie zostal przesuniety w osi X. [0x09]")
+						//pZero = CreateOrModifyDatum( "Point", Pomocnicze1 , `Sys\Knowledge Pattern&&&\StartX` , 0)
+						pZero = point(0mm,0mm,0mm)
+						dx = 0mm
+					}	
+					
+					x = x - dx
+					
+					distTemp = x + 250mm
+					distTemp2 = wysPodlList->GetItem(k)
+					if pos == true{
+						startZ = point(distTemp, y, wysPodlList->GetItem(k)) //Adnotacje w  Z
+						MeasureZ = CreateOrModifyDatum("Line", Measure1  , Sys\MainKnowlegde3Pattern\AgroMeasure, 0)
+						MeasureZ.Name = name + surname
+						MeasureZ = line(startZ, point(distTemp, y, distTemp2 + WysokoscFotela))
+						MeasureZ.UserInfoComment = DimToString(WysokoscFotela,"mm")
+						centerZ = pointoncurveRatio(MeasureZ, startZ, 0.5 , true)
+						`Relations\VB Scripts.1\VB Script.1`  ->Run(ToString((FormatNumber(WysokoscFotela, "decimal", 4)->ToReal())*1000) , centerZ)
+					}
+				}
+				
+				p = CreateOrModifyDatum("point", System\PunktyFotelNowe ,  Sys\MainKnowlegde3Pattern\PunktyFotelNowe , i - CurrentShift->GetItem(k)) //
+				p = point(x, y, z) //punkt wyjsciowy
+				p.Name = name + surname
+				KP3Points.SetItem(p, i - CurrentShift->GetItem(k))
+				`Relations\VB Scripts.1\VB Script.1`  ->Run(name, p) //adnotacja
+				
+				fotel = CreateOrModifyDatum("Surface", Fotele , Sys\MainKnowlegde3Pattern\Fotele0 , i - CurrentShift->GetItem(k))
+				fotel.Name = name + surname
+				set fotel = translate(surf, direction(x,y,z), sqrt(x*x + y*y + z*z))
+				fotelK = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\Korekta  , 0)
+				fotelK.Name = name + surname
+				set fotelK = translate(surf, direction(x,y,z), sqrt(x*x + y*y + z*z))
+				
+				if(Krok1Show1 ->GetItem(i+1) == true){
+					xp1 = p->coord(1)
+					yp1 = p->coord(2) - SzerokoscFotela
+					zp1 = p->coord(3)
+					
+					p = CreateOrModifyDatum("point", System\PunktyFotelNowe ,  Sys\MainKnowlegde3Pattern\PunktyFotelNowe , i - CurrentShift->GetItem(k) + 1)
+					p = point(xp1, yp1, zp1) //wspolrzedne fotela obok
+					p.Name = name + surname
+					KP3Points.SetItem(p, i - CurrentShift->GetItem(k) + 1)
+					
+					surf = System\FoteleBazaJoin -> Query("surface", "")->GetItem(Krok1Type1  ->GetItem(i + 1))
+					fotel = CreateOrModifyDatum("Surface", Fotele , Sys\MainKnowlegde3Pattern\Fotele0 , i - CurrentShift->GetItem(k) + 1)
+					fotel.Name = name + surname + "R"
+					set fotel = translate(surf, direction(xp1,yp1,zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1) )
+					fotelK = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\Korekta , 0)
+					fotelK.Name = name + surname + "R"
+					set fotelK = translate(surf, direction(xp1,yp1,zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1) )
+				}
+				k = k + 1
+			}
+			else{ //fotel niezgodnie
+				
+				dz = isNotSetdz->GetItem(k)
+				z = z - dz
+				
+				if(Krok1Show1->GetItem(i + 2) <> true){
+					shiftTemp = 1 //potrzbne bo gubi numeracje gdy ktorys z foteli obok jest kryty
+				}
+				else{
+					shiftTemp = 0
+				}
+				if(Krok1Show1->GetItem(i + 1) <> true){
+					shiftTemp = shiftTemp + 1
+				}
+				if(Krok1Show1->GetItem(i + 3) <> true){
+					shiftTemp = shiftTemp + 1
+				}
+				
+				xp1 = KP3Points -> GetItem(i + 4 - CurrentShift->GetItem(k) - shiftTemp)->coord(1)
+				yp1 = KP3Points -> GetItem(i + 4 - CurrentShift->GetItem(k) - shiftTemp)->coord(2)
+				zp1 = KP3Points -> GetItem(i + 4 - CurrentShift->GetItem(k) - shiftTemp)->coord(3)
+				
+				surf = System\FoteleBazaJoin -> Query("surface", "")->GetItem(config.Size() +Krok1Type1  ->GetItem(i)) //korekcja w X
+				set g  = translate(surf, direction(x , y, z), sqrt(x*x + y*y + z*z)) //fotel aktualnie ustawiany
+				if(Krok1Angle1 ->GetItem(i+4) <> 0 deg){ //fotel niezgodnie, odniesienie niezgodnie z kierunkiem jazdy
+					
+					set h = translate(  System\FoteleBazaJoin -> Query("surface", "")->GetItem(config.Size() + Krok1Type1 ->GetItem(i + 4) ) , direction(xp1, yp1, zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1))
+					wysPodl = wysPodlList->GetItem(k)
+					liPoprz = line(point(x + 400mm, y,wysPodl+ 620mm), point(x - 2400mm, y, wysPodl + 620mm))
+					liPoprzObn = line(point(x + 300mm, y, wysPodl+ 540mm), point(x - 2000mm, y, wysPodl + 540mm))
+					
+					currentLine = NULL
+					if(distance(liPoprz, h) == 0mm and distance(liPoprz, g) == 0mm){
+						currentLine = liPoprz
+					}
+					else if(distance(liPoprzObn, h) == 0mm and distance(liPoprzObn, g) == 0mm){
+						currentLine = liPoprzObn
+					}
+					if(currentLine <> NULL ){
+						Klasyfikacja.SetItem(OdlegloscOdPoprzedzajacego, i ) //do kroku 3 - sprawdzenia
+						if pos == true{
+							StartX = near(intersect(currentLine, h), System\DodatkowePodloga\Przod )
+							EndX = near(intersect(currentLine, g), System\DodatkowePodloga\Tyl )
+							distX = distance(StartX, EndX)
+							dx = distX - OdlegloscOdPoprzedzajacego
+							
+							MeasureX = CreateOrModifyDatum("Line", Measure1  , Sys\MainKnowlegde3Pattern\AgroMeasure ,0)
+							MeasureX.Name = name + surname
+							MeasureX = line(StartX,  point(StartX ->coord(1) + OdlegloscOdPoprzedzajacego  , StartX ->coord(2), StartX ->coord(3)))
+							MeasureX.UserInfoComment = DimToString(OdlegloscOdPoprzedzajacego   ,"mm")
+							centerX = pointoncurveRatio(MeasureX, StartX, 0.5 , true)
+							`Relations\VB Scripts.1\VB Script.1`  ->Run(ToString((FormatNumber(OdlegloscOdPoprzedzajacego, "decimal", 4)->ToReal())*1000) , centerX)
+							myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2))), OdlegloscOdPoprzedzajacego , "LENGTH") 						
+						}
+					}	
+					else{	
+						if pos == true{
+							Message("Brak sciany i fotela poprzedzajacego: rzad ", ceil(i/4), ". Fotel ", mod(i,4), " nie zostal przesuniety w osi X. [0x0a]")
+							//Klasyfikacja.SetItem(0mm, i ) //do Action.4 (Check)
+						}
+						else{
+							Notify("Rzad ", ceil(i/4), surname, " nie zostal sklasyfikowany [0x0d]")
+						}
+						sh->SetCell(i+1, 10, "Brak sciany i fotela poprzedzajacego: rzad " + ceil(i/4) + ". Fotel " + mod(i,4) + " nie zostal przesuniety w osi X. [0x0a]")
+						//pZero = CreateOrModifyDatum( "Point", Pomocnicze1 , `Sys\Knowledge Pattern&&&\StartX` , 0)
+						pZero = point(0mm,0mm,0mm)
+						dx = 0mm
+					}	
+				}	
+				else{ //fotel niezgodnie, odniesienie zgodnie z kierunkiem jazdy
+					
+					set h = translate(  System\FoteleBazaJoin -> Query("surface", "")->GetItem( Krok1Type1 ->GetItem(i + 4)) , direction(xp1, yp1, zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1)) //h = `Relations\Knowledge Pattern.3\Fotele0` ->GetItem(i-4-shift+shiftTemp - 2*isNotSet.Size()) //powinno dzialac i byc szybsze
+					wysPodl = wysPodlList->GetItem(k)
+					
+					if(zp1 > z){
+						dzPoprz = zp1 - z //dystans o ktory podnosimy liPoprz jesli fotel odniesienia jest wyzej, zeby pozioma linia pomiarowa trafila na oparcie i jak najblizej siedziska
+					}
+					else{
+						dzPoprz = 0mm
+					}
+					//liPoprz = CreateOrModifyDatum( "Line", System\Pomocnicze1  , Sys\MainKnowlegdePattern3\List.9  , 0)
+					liPoprz = line(point(x + 300mm, y + 0.01mm, wysPodl + WysokoscFotela + 10mm + dzPoprz), point(x - 2000mm, y + 0.01mm, wysPodl + WysokoscFotela + 10mm + dzPoprz)) //+ 0.01mm patrz 1 przejscie
+					
+					currentLine = NULL
+					if(distance(liPoprz, h) == 0mm and distance(liPoprz, g) == 0mm){
+						currentLine = liPoprz
+					}
+					if(currentLine <> NULL ){
+						
+						Klasyfikacja.SetItem(OdlegloscSkierowanychDoSiebie, i ) //do Action.4 (Check)
+						if pos == true{
+							StartX = near(intersect(currentLine , h), System\DodatkowePodloga\Przod)
+							EndX = near(intersect(currentLine , g), System\DodatkowePodloga\Tyl)
+							distX = distance(StartX, EndX)
+							dx = distX - OdlegloscSkierowanychDoSiebie
+							
+							MeasureX = CreateOrModifyDatum("Line", Measure1, Sys\MainKnowlegde3Pattern\AgroMeasure ,0)
+							MeasureX.Name = name + surname
+							MeasureX = line(StartX,  point(StartX ->coord(1) + OdlegloscSkierowanychDoSiebie, StartX ->coord(2), StartX ->coord(3)))
+							MeasureX.UserInfoComment = DimToString(OdlegloscSkierowanychDoSiebie,"mm")
+							centerX = pointoncurveRatio(MeasureX, StartX, 0.5 , true)
+							`Relations\VB Scripts.1\VB Script.1`  ->Run(ToString((FormatNumber(OdlegloscSkierowanychDoSiebie, "decimal", 4)->ToReal())*1000), centerX)
+							myList7->SetAttributeDimension("List7P."+ToString( int(ceil((4*(i) - 3)/2))), OdlegloscSkierowanychDoSiebie , "LENGTH")
+						}
+					}
+					else{
+						if pos == true{
+							Message("Brak sciany i fotela poprzedzajacego: rzad ", ceil(i/4), surname, " nie zostal przesuniety w osi X. [0x0b]")
+						}
+						else{
+							Notify("Rzad ", ceil(i/4), surname, " nie zostal sklasyfikowany [0x0d]")
+						}
+						
+						//pZero = CreateOrModifyDatum( "Point", Pomocnicze1 , `Sys\Knowledge Pattern&&&\StartX` , 0)
+						pZero = point(0mm,0mm,0mm)	
+						dx = 0mm
+						//Klasyfikacja.SetItem(0mm, i ) //do Action.4 (Check)
+					}
+				}
+				x = x - dx
+				
+				distTemp = x - 250mm
+				distTemp2 = wysPodlList->GetItem(k)
+				if pos == true{
+					startZ = point(distTemp, y, wysPodlList->GetItem(k)) //Adnotacje w  Z
+					MeasureZ = CreateOrModifyDatum("Line", Measure1  , Sys\MainKnowlegde3Pattern\AgroMeasure ,0)
+					MeasureZ.Name = name + surname
+					MeasureZ = line(startZ, point(distTemp, y, distTemp2 + WysokoscFotela))
+					MeasureZ.UserInfoComment = DimToString(WysokoscFotela,"mm")
+					centerZ = point(distTemp , y, distTemp2 + WysokoscFotela/2)
+					`Relations\VB Scripts.1\VB Script.1`  ->Run(ToString((FormatNumber(WysokoscFotela, "decimal", 4)->ToReal())*1000) , centerZ)
+				}
+				p = CreateOrModifyDatum("point", System\PunktyFotelNowe ,  Sys\MainKnowlegde3Pattern\PunktyFotelNowe ,  i - CurrentShift->GetItem(k))
+				p = point(x, y, z) //punkt wyjsciowy
+				p.Name = name + surname
+				KP3Points.SetItem(p, i - CurrentShift->GetItem(k))
+				`Relations\VB Scripts.1\VB Script.1`  ->Run(name, p) //adnotacja
+				
+				fotel = CreateOrModifyDatum("Surface", Fotele , Sys\MainKnowlegde3Pattern\Fotele0 , i - CurrentShift->GetItem(k))
+				fotel.Name = name + surname
+				set fotel = translate(surf, direction(x,y,z), sqrt(x*x + y*y + z*z))
+				fotelK = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\Korekta  , 0)
+				fotelK.Name = name + surname
+				set fotelK = translate(surf, direction(x,y,z), sqrt(x*x + y*y + z*z))
+				
+				if(Krok1Show1 ->GetItem(i+1) == true){
+					xp1 = p->coord(1)
+					yp1 = p->coord(2) - SzerokoscFotela
+					zp1 = p->coord(3)
+					
+					p = CreateOrModifyDatum("point", System\PunktyFotelNowe,  Sys\MainKnowlegde3Pattern\PunktyFotelNowe , i - CurrentShift->GetItem(k) + 1) //
+					p = point(xp1, yp1, zp1) //wspolrzedne fotela obok
+					p.Name = name + surname
+					KP3Points.SetItem(p, i - CurrentShift->GetItem(k) + 1)
+					
+					surf = System\FoteleBazaJoin -> Query("surface", "")->GetItem(config.Size() + Krok1Type1  ->GetItem(i + 1))
+					fotel = CreateOrModifyDatum("Surface", Fotele , Sys\MainKnowlegde3Pattern\Fotele0 , i - CurrentShift->GetItem(k) + 1)   //
+					fotel.Name = name + surname + "R"
+					set fotel = translate(surf, direction(xp1,yp1,zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1) )
+					fotelK = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\Korekta , 0)   //
+					fotelK.Name = name + surname + "R"
+					set fotelK = translate(surf, direction(xp1,yp1,zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1))
+				}
+				k = k + 1			
+			}
+		}
+		else{ //ostatni rzad //kod skopiowany z powyzszej petli z wylaczeniem warunku o kieruku fotela
+			name = "Rzad" + ceil(i/4) //nazewnictwo
+			if(mod(i,4) == 1 or mod(i,4) == 2){
+				surname = " Lewa"
+			}
+			else{
+				surname = "Prawa"
+			}
+			
+			searchStr = "x.Name == " + "\"" + name + surname + "\""
+			open1 = Korekta->Find("OpenBodyFeature", searchStr, true) //geoset do stworzenia kopii geometrii foteli - wejscie w cykl korekcji	
+			
+			x =Sys\Knowledge1Pattern\PunktyFotel ->GetItem(i) -> coord(1) //spisanie wspolrzednych wejsciowych
+			y = Sys\Knowledge1Pattern\PunktyFotel ->GetItem(i) -> coord(2)
+			z = Sys\Knowledge1Pattern\PunktyFotel ->GetItem(i) -> coord(3)
+			
+			distTemp = x - 250mm
+			distTemp2 = wysPodlList->GetItem(k)
+			
+			dz = isNotSetdz->GetItem(k)
+			z = z - dz
+			if pos == true{
+				startZ = point(distTemp, y, wysPodlList->GetItem(k)) //Adnotacje w  Z
+				MeasureZ = CreateOrModifyDatum("Line", Measure1  , Sys\MainKnowlegde3Pattern\AgroMeasure ,0)
+				MeasureZ.Name = name + surname
+				MeasureZ = line(startZ, point(distTemp, y, distTemp2 + WysokoscFotela))
+				MeasureZ.UserInfoComment = DimToString(WysokoscFotela,"mm")
+				centerZ = point(distTemp , y, distTemp2 + WysokoscFotela/2)
+				`Relations\VB Scripts.1\VB Script.1`  ->Run(ToString((FormatNumber(WysokoscFotela, "decimal", 4)->ToReal())*1000) , centerZ)
+			}
+			p = CreateOrModifyDatum("point", System\PunktyFotelNowe ,  Sys\MainKnowlegde3Pattern\PunktyFotelNowe , i - CurrentShift->GetItem(k))
+			p = point(x, y, z) //punkt wyjsciowy
+			p.Name = name + surname
+			KP3Points.SetItem(p, i - CurrentShift->GetItem(k))
+			if( Krok1Angle1  ->GetItem(i) == 0){
+				surf = System\FoteleBazaJoin -> Query("surface", "")->GetItem(Krok1Type1 ->GetItem(i)) //Konfiguracja fotela
+			}
+			else{	
+				surf = System\FoteleBazaJoin -> Query("surface", "")->GetItem(config.Size() + Krok1Type1 ->GetItem(i + 1))
+			}
+			fotel = CreateOrModifyDatum("Surface", Fotele , Sys\MainKnowlegde3Pattern\Fotele0 , i - CurrentShift->GetItem(k))
+			fotel.Name = name + surname
+			set fotel = translate(surf, direction(x,y,z), sqrt(x*x + y*y + z*z))
+			fotelK = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\Korekta  , 0)
+			fotelK.Name = name + surname
+			set fotelK = translate(surf, direction(x,y,z), sqrt(x*x + y*y + z*z))
+			
+			if(Krok1Show1 ->GetItem(i+1) == true){
+				xp1 = p->coord(1)
+				yp1 = p->coord(2) - SzerokoscFotela
+				zp1 = p->coord(3)
+				
+				p = CreateOrModifyDatum("point", System\PunktyFotelNowe ,  Sys\MainKnowlegde3Pattern\PunktyFotelNowe , i - CurrentShift->GetItem(k) + 1) //
+				p = point(xp1, yp1, zp1) //wspolrzedne fotela obok
+				p.Name = name + surname
+				KP3Points.SetItem(p, i - CurrentShift->GetItem(k) + 1)
+				
+				fotel = CreateOrModifyDatum("Surface", Fotele , Sys\MainKnowlegde3Pattern\Fotele0 , i - CurrentShift->GetItem(k) + 1)   //
+				fotel.Name = name + surname + "R"
+				set fotel = translate(surf, direction(xp1,yp1,zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1) )
+				fotelK = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\Korekta , 0)   //
+				fotelK.Name = name + surname + "R"
+				set fotelK = translate(surf, direction(xp1,yp1,zp1), sqrt(xp1*xp1 + yp1*yp1 + zp1*zp1))
+			}
+			if pos == true {
+				Message("Rzad ", ceil(i/4), surname, " nie zostal przesuniety w osi X. [0x0c]")
+			}
+			else{
+				Notify("Rzad ", ceil(i/4), surname, " nie zostal sklasyfikowany [0x0d]")
+			}
+			sh->SetCell(i+1, 10, "Rzad " + ceil(i/4) + ". fotel " + mod(i,4) + " nie zostal przesuniety w osi X. [0x0c]")
+			//Klasyfikacja.SetItem(0mm, i ) //do Action.4 (Check)
+			
+			k = k + 1
+		}
+	}
+}
+i = 1
+for p1 inside KP3Points{ //kopia
+	p = CreateOrModifyDatum("Point", System\PunktyKorekta1  , Sys\MainKnowlegde3Pattern\Korekta1 , 0)
+	p = point(p1->coord(1), p1->coord(2), p1->coord(3))  //w ten sposob kod w KESie jest w stanie poprawnie ustawic zlozenia
+	p.Name = p1.Name
+}
+
+Let myPocketPS (AdvisorParameterSet)
+Let myValue (LENGTH)
+
+i = 1
+for i while i <= ceil(Sys\Knowledge1Pattern\PunktyFotel .Size()/4){ //ustawianie parametrow w drzewie na takie jakie wybral uzytkownik
+	
+	myPocketPS = `Rzedy Lewa`
+	len1 = List7 ->GetItem(8*i - 7)
+	myPocketPS ->SetAttributeReal("x" + ToString(i), len1)
+	myPocketPS ->SetAttributeReal("y" + ToString(i), 0mm)
+	myPocketPS ->SetAttributeReal("z" + ToString(i), WysokoscFotela)
+	myPocketPS ->SetAttributeReal("a" + ToString(i), 0 deg)
+	
+	myPocketPS = `Rzedy Prawa`
+	len1 = List7 ->GetItem(8*i - 3)
+	myPocketPS ->SetAttributeReal("x" + ToString(i) + "r", len1)
+	myPocketPS ->SetAttributeReal("y" + ToString(i)  + "r", 0mm)
+	myPocketPS ->SetAttributeReal("z" + ToString(i)  + "r", WysokoscFotela)
+	myPocketPS ->SetAttributeReal("a" + ToString(i)  + "r", 0 deg)
+}
+
+i = 1
+for tempReal inside List7 { //Kopiowanie KorektaList do List7Copy //Nie idzie przez Copy(), tylko przez petle
+	if(mod(i,4) <> 0){ //nie kat
+		len1 = tempReal
+		myList7Copy->SetAttributeDimension("List7CopyP."+ToString(i), len1, "LENGTH")
+	}
+	else
+	{
+		ang1 = tempReal
+		myList7Copy->SetAttributeDimension("List7CopyP."+ToString(i), ang1, "Angle")
+	}
+	i = i + 1
+}
+
+i = 1
+for tempReal inside List7 { //Kopiowanie KorektaList do List7Copy //Nie idzie przez Copy(), tylko przez petle
+	if(mod(i,4) <> 0){ //nie kat
+		len1 = tempReal
+		myKorektaList->SetAttributeDimension("KorektaListP."+ToString(i), len1, "LENGTH")
+	}
+	else
+	{
+		ang1 = tempReal
+		myKorektaList->SetAttributeDimension("KorektaListP."+ToString(i), ang1, "Angle")
+	}
+	i = i + 1
+}
+
+AnnotationSet1 -> RepairDeleteInvalidFTAFeatures(32)  //`public3D Shape00307399 A.1` -> Find("CATTPSSet", "", true)
+dt.Activity = true
+isNotSet2 .Append(0) //zapobiega bledowi w "Krok 3 - Sprawdzenie"
+KP5Points .RemoveAll() //wejscie w cykl, patrz "Krok 2 - Ustawienie adaptera" (Action)
+Measure1.Show = true
+Measure .Show = false
+Fotele .Show = false
+Przekroje .Show = false
+Korekta .Show = true
+Makieta.Show = false
+Makieta.Show = false
+
+if(FotelSrodekTylnaLawka > 0){
+	p = KP3Points .GetItem(KP3Points.Size())
+	searchStr = "x.Name == " + "\"" + p.Name + "\""
+	open1 = Korekta->Find("OpenBodyFeature", searchStr, true)
+	
+	surfSzer = open1.Find("Surface", searchStr, true)
+	surfListS=FoteleBaza ->Query("Surface", "")
+	surf = surfListS.GetItem(FotelSrodekTylnaLawka)
+	szer = 4000mm - distance(surfSzer, System\DodatkowePodloga\Lewa) - distance(surfSzer, System\DodatkowePodloga\Prawa) //czy fotel jest poltorowka
+	xFotelS = p.coord(1) //wspolrzedna nowego fotela
+	zFotelS = p.coord(3)
+	if(szer < 500mm){ //jesli jest jedynka to na pewno jest para, tylko wtedy uzytkownik wlacza fotel srodek
+		if(p.Name.Search("Lewa", 1, true) >= 0){		
+			yFotelS = p.coord(2) - SzerokoscFotela //2*SzerokoscFotela
+			fotel = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\List.9, 0)
+			set fotel = translate(surf, direction(xFotelS, yFotelS, zFotelS), sqrt(xFotelS*xFotelS + yFotelS*yFotelS + zFotelS*zFotelS))
+		}
+		if(p.Name.Search("Prawa", 1, true) >= 0){
+			yFotelS = p.coord(2) + 2*SzerokoscFotela
+			fotel = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\List.9, 0)
+			set fotel = translate(surf, direction(xFotelS, yFotelS, zFotelS), sqrt(xFotelS*xFotelS + yFotelS*yFotelS + zFotelS*zFotelS))
+		}
+	}
+	else{  //jesli jest poltorowka to nie moze byc para w rzedzie. Dodatkowo poltorowka poki co nie moze byc fotelem srodek
+		if(p.Name.Search("Lewa", 1, true) >= 0){		
+			yFotelS = p.coord(2) - Sys\Advanced\SzerokoscPoltorowka/2 - SzerokoscFotela/2 //2*SzerokoscFotela
+			fotel = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\List.9, 0)
+			set fotel = translate(surf, direction(xFotelS, yFotelS, zFotelS), sqrt(xFotelS*xFotelS + yFotelS*yFotelS + zFotelS*zFotelS))
+		}
+		if(p.Name.Search("Prawa", 1, true) >= 0){
+			yFotelS = p.coord(2) + Sys\Advanced\SzerokoscPoltorowka/2 + SzerokoscFotela/2
+			fotel = CreateOrModifyDatum("Surface", open1 , Sys\MainKnowlegde3Pattern\List.9, 0)
+			set fotel = translate(surf, direction(xFotelS, yFotelS, zFotelS), sqrt(xFotelS*xFotelS + yFotelS*yFotelS + zFotelS*zFotelS))
+		}
+	}
+	fotel.Name = "FotelS"
+}
+
+if(KES_brigdeInt1  == 1){ //rusza KES_Bridge1
+	KES_brigdeInt1   = 0
+}
+else{
+	KES_brigdeInt1  = 1
+}
+
+
+//adapter_driver
+//Akcja uruchamia procedure ustawiajaca adapter, pozycjonujaca fotel wzgledem adaptera i przesuwajaca cale zlozenie fotela zgodnie z parametrami w drzewie
+//uruchamiany przez Krok2, uruchamia kes/adapter
+
+let root (VPMReference)
+let i, typ, cnt (integer)
+let ScianyAdapterPowierzchnieRawXY, ScianyAdapterPowierzchnieRawZ, ScianyAdapterPowierzchnieRawN, lErrors, ScianyAdapterPowierzchnieRaw0XY (List)
+let p, pIter, pTemp, pp (point)
+let LinePunkt (line)
+let surfIter, planePunkt, scianaCurrent, empty, surfCheck1, surfCheck2, surfCheck3, surfCheck4 , surfCheck, scianaWpis (Surface)
+let wpis, krzywizna (boolean)
+
+root = GetEditorRoots("VPMReference").GetItem(1)
+empty = System\Empty\empty
+ScianyAdapterPowierzchnieListN .RemoveAll() //przygotowanie list //n - nadkole
+ScianyAdapterPowierzchnieListXY .RemoveAll() //Adapter_x_y_n
+ScianyAdapterPowierzchnieListZ .RemoveAll() //Adapter_z
+
+if(KP5Points.Size() < KP3Points.Size()){ //wejscie w cykl po pierwszym rozstawie
+	KP5Points.RemoveAll()
+	for pIter inside KP3Points{
+		pTemp = pIter //uniezaleznienie KP5 od KP3
+		KP5Points.Append(pTemp)
+	}
+}
+
+ScianyAdapterPowierzchnieRaw0XY = Adapter_x_y_n ->Query("Surface", "")//powierzchnie
+ScianyAdapterPowierzchnieRawZ = Adapter_z->Query("Surface", "")//powierzchnie
+
+for surfIter inside ScianyAdapterPowierzchnieRaw0XY{ //okreslanie typu mocowania w Adaptery_x_y_n
+	
+	DisableErrors(TRUE,FALSE,FALSE) //sprawdzenie czy powierzchnia ma krzywizne - konieczne dla nadkola
+	axis(surfIter)
+	lErrors = EnableErrors()
+	if lErrors.Size() > 0 {
+		krzywizna = false
+	}
+	else{
+		krzywizna = true
+	}
+	
+	if(18000mm - distance(System\DodatkowePodloga\Przod, surfIter) - distance(System\DodatkowePodloga\Tyl, surfIter) > 300mm and 4000mm - distance(System\DodatkowePodloga\Lewa, surfIter) - distance(System\DodatkowePodloga\Prawa, surfIter) > 600mm and 6000mm - distance(System\DodatkowePodloga\Gora, surfIter) - distance(System\DodatkowePodloga\Dol , surfIter) > 200mm and krzywizna){ //kolejno wymiar X, Y, Z
+		ScianyAdapterPowierzchnieRawN.Append(surfIter) //Lista "Raw" zawiera surowe dane o powierzchniach z modelu
+	}
+	else{
+		ScianyAdapterPowierzchnieRawXY.Append(surfIter)
+	}
+}
+
+wpis = true
+i = 1
+for i while i < KP5Points.Size(){ //przygotowanie list z powierzchniami, do ktorej mocowane sa adaptery
+	
+	p = KP5Points ->GetItem(i)
+	if(i>1){
+		pp =  KP5Points.GetItem(i-1)
+	}
+	else{
+		pp = System\Empty\Point1234567890 //jesli pierwszy punkt na liscie to na pewno lewy z pary
+	}
+	if(p.Name <> pp.Name){ //jesli lewy z pary (zalozenie: pojedynczy z pary jest zawsze lewy)
+		
+		//surfCheck = new("Surface", "ok1", System\Pomocnicze2)
+		surfCheck1 = extrude(extrude(p, direction(0mm,1mm,0mm), 400mm, 800mm, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true) //3 rownolegle pionowe poprzeczne surfacy
+		surfCheck2 = extrude(extrude(point(p->coord(1) - 300mm, p->coord(2), p->coord(3)), direction(0mm,1mm,0mm), 400mm, 800mm, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true)
+		surfCheck3 = extrude(extrude(point(p->coord(1) + 300mm, p->coord(2), p->coord(3)), direction(0mm,1mm,0mm), 400mm, 800mm, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true)
+		surfCheck = assemble( surfCheck1, surfCheck2, surfCheck3)
+		
+		LinePunkt = extrude(p, direction(0mm,0mm,1mm), 100mm, 100mm, true)
+		planePunkt = extrude(LinePunkt,direction(1mm,0mm,0mm), 100mm, 100mm, true) //powierzchnia pionowa wzdluzna od kazdego punktu po korekcie
+		
+		cnt = 0 //licznik powtowrzen powierzchni
+		for scianaCurrent inside ScianyAdapterPowierzchnieRawN{
+			if distance(surfCheck, scianaCurrent) <= 150 mm{
+				scianaWpis = scianaCurrent
+				cnt = cnt + 1
+			}
+		}
+		
+		if cnt == 1{
+			ScianyAdapterPowierzchnieListN.Append(scianaWpis)
+		}
+		else if cnt > 1{
+			ScianyAdapterPowierzchnieListN.Append(scianaWpis)
+			Notify("Pod jednym z foteli na nadkole jest wiecej niz jedna powierzchnia adaptera typu adapter_x_y_n. Fotel ustawiany wzgledem #  [0x01]", scianaWpis.Name)
+		}
+		else{
+			ScianyAdapterPowierzchnieListN.Append(empty) //Pod jednym z foteli na nadkole nie ma powierzchni adaptera
+		}
+		
+		cnt = 0 //XY //Listy "Raw" przerabia na wartsoci przyporzadkowane do kazdego siedzenia
+		for scianaCurrent inside ScianyAdapterPowierzchnieRawXY{
+			if distance(surfCheck, scianaCurrent) <= 150 mm{
+				scianaWpis = scianaCurrent
+				cnt = cnt + 1
+			}
+		}		
+		
+		if cnt == 1{
+			ScianyAdapterPowierzchnieListXY.Append(scianaWpis)
+		}
+		else if cnt > 1{
+			ScianyAdapterPowierzchnieListXY.Append(scianaWpis)
+			Notify("Pod jednym z foteli na podest jest wiecej niz jedna powierzchnia adaptera typu adapter_x_y_n. Fotel ustawiany wzgledem # [0x02]", scianaWpis.Name)
+		}
+		else{
+			ScianyAdapterPowierzchnieListXY.Append(empty)
+		}
+		
+		cnt = 0 //Z
+		for scianaCurrent inside ScianyAdapterPowierzchnieRawZ{
+			if distance(surfCheck, scianaCurrent) <= 150 mm{
+				scianaWpis = scianaCurrent
+				cnt = cnt + 1
+			}
+		}		
+		
+		if cnt == 1{
+			ScianyAdapterPowierzchnieListZ.Append(scianaWpis)
+		}
+		else if cnt > 1{
+			ScianyAdapterPowierzchnieListZ.Append(scianaWpis)
+			Notify("Pod jednym z foteli na podest jest wiecej niz jedna powierzchnia adaptera typu adapter_z. Fotel ustawiany wzgledem # [0x03]", scianaWpis.Name)
+		}
+		else{
+			ScianyAdapterPowierzchnieListZ.Append(empty) //Pod jednym z foteli na nadkole nie ma powierzchni adaptera
+		}	
+	}
+}
+
+Sys\kes\adapter  -> Run()
+
+
+
+
+/* Action created by jakub.krajanowski 2021-04-16 */
+//KP4driver
+//wywolywany przez Krok4 //wywoluje KP4
+
+let i (Integer)
+let list1 (List)
+let li (Line)
+let searchStr, name, surname (String)
+let open1 (OpenBodyFeature)
+
+for i inside doSprawdzenia {
+	name = "Rzad" + ceil(i/4)
+	if(mod(i,4) == 1 or mod(i,4) == 2){
+		surname = " Lewa"
+	}
+	else{
+		surname = "Prawa"
+	}
+	searchStr = name + surname
+	list1 = Measure1 .Query("Line", "")
+	for li inside list1{ //usuwanie linii z kroku 1
+		if li.Name.Search(searchStr) >= 0{
+			li.Delete()
+		}
+	}
+	
+	searchStr =  "x.Name == " + "\"" + name + surname + "\""
+	open1 = Measure.Find("OpenBodyFeature", searchStr, true)
+	if(open1 <> NULL){
+		list1 = open1.Query("Line", "") //usuwanie lini z poprzedniego wykonania kroku 4
+	}
+	for li inside list1{
+		if li.Name.Search(searchStr) >= 0{
+			li.Delete()
+		}
+	}
+}
+
+System\Empty\Point1234567890.Activity = false
+System\Empty\Point1234567890.Activity = true
+Sys\MainKnowledge4Pattern.Update()
+
+
+
+
+//KP4
+//Sprawdza zgodnosc rozstawu foteli z geosetu "Korekta" z regulaminem 107
+//Wywolywany przez KP4driver
+//Main oznacza glowny fragment kodu z danego kroku
+
+let surfList, listVB, doSprawdzeniaDupl (List)
+let surfIter, podloga, sciany, fotele, f, f1, g, su, surfCheckDown, su1, suPrzekr, suPoprzeczna, pow, scianaTyl, su2 (Surface)
+let surfCheck1, surfCheck2, surfCheck3, surfCheck4, surfCheck, surfCheckUp, suPoprz1 (Surface)
+let MeasureX, MeasureXX, MeasureZ, liV1, liV2, liH1, liHf, liHg, liVTyl, lineVB, pom1, linePom1 (Line)
+let i, shift, k, iter (Integer)
+let x,y,z, distXZ, distX, distz, DistValue, suLewo, suPrawo, powLewo, powLewoDoPrzodu, powPrawo, Rbanki, myValue, len1, len2, len3, distz2, distz3, gx, gy, gz, liH1dy, diff (LENGTH)
+let a, b, tempReal (Real)
+let StartX , StartZ, centerX, centerZ, EndX, EndZ, centerVB , p, EndXf (Point)
+let planePrzod, planeTyl, planeTyl1, planeTyl2, planePrzod1, planePrzod2, PlaneTylf, PlaneTylg, planePr, plOffH (Plane)
+let name, surname, searchStr, fName, fSurname (String)
+let sha (Feature)
+let dt (DesignTableType)
+let sh (DTSheetType)
+let root (VPMReference)
+let fPr, int1, int2 (Curve)
+Let myPocketPS (AdvisorParameterSet)
+let ang1 (ANGLE)
+let myList7, myList7Copy, myKorektaList (AdvisorParameterSet)
+let open1 (OpenBodyFeature)
+let podlogaUstawiona (Boolean)
+
+System\Empty\Point1234567890.coord(1)
+
+myList7 = Sys\Advanced\List7Param
+myList7Copy = Sys\Advanced\List7CopyParam
+myKorektaList = Sys\Advanced\KorektaListParam
+
+for surfIter inside Podloga -> Query("surface" , ""){
+	podloga = assemble(podloga, surfIter)
+}
+for surfIter inside Sciany  -> Query("surface" , ""){
+	sciany = assemble(sciany, surfIter)
+}
+
+suLewo = 400mm //su - powierzchnia do mierzenia odleglosci od podlogi
+suPrawo = 800mm
+powLewo = 400mm //pow - powierzchnia do mierzenia odleglosci od sciany
+powLewoDoPrzodu = 550mm
+powPrawo = 800mm
+Rbanki = 100mm //promien obszaru w ktorym lapie surfCheck
+
+surfList = Korekta  -> Query("Surface", "")
+for i inside doSprawdzenia {
+	doSprawdzeniaDupl.Append(i)
+}
+doSprawdzeniaDupl.RemoveDuplicates()
+
+root = GetEditorRoots("VPMReference").GetItem(1)
+
+sha = GetRootUI() //tabela do komunikatow
+dt = sha -> Find("DesignTableType", "", true)
+sh = dt-> Find("DTSheetType", "", true)
+dt.Activity = false
+
+i=1
+for i while i <= Sys\Krok1Show1Size { //czyszczenie komunikatow w design table
+	sh->SetCell(i+1, 9, " ")
+	sh->SetCell(i+1, 10, " ")
+	sh->SetCell(i+2, 9, " ")
+	sh->SetCell(i+2, 10, " ")
+}
+
+i = 1
+//k = 1
+for i inside doSprawdzeniaDupl  {
+	
+	podlogaUstawiona = true //od podlogi zalezy pomiar x
+	
+	if(Krok1Show1  -> GetItem(i) == true){
+		if(mod(i,2) == 1) {
+			iter = 1
+			shift = 0
+			for iter while iter <= i{ //awaryjna petla - zliczanie shifta dla kazdej iteracji osobno
+				if(Krok1Show1.GetItem(iter) == false ){
+					shift = shift + 1
+				}
+			}
+			
+			name = "Rzad" + ceil(i/4) //nazewnictwo
+			if(mod(i,4) == 1 or mod(i,4) == 2){
+				surname = " Lewa"
+			}
+			else{
+				surname = "Prawa"
+			}
+			
+			searchStr = "x.Name == " + "\"" + name + surname + "\""
+			open1 = Measure ->Find("OpenBodyFeature", searchStr, true) //geoset do stworzenia kopii geometrii foteli
+			
+			x =  Sys\KnowledgePattern5\PunktyKorekta1   ->GetItem(i-shift)->coord(1)
+			y = Sys\KnowledgePattern5\PunktyKorekta1  ->GetItem(i-shift)->coord(2)
+			z = Sys\KnowledgePattern5\PunktyKorekta1   ->GetItem(i-shift)->coord(3)
+			p = point(x,y,z)
+			
+			if(Krok1Angle1   -> GetItem(i) == 0 ){ //okreslenie strony, w ktora zwrocony jest dany fotel
+				a = 1 //w przod
+				planePrzod = System\DodatkowePodloga\Przod
+				planeTyl = System\DodatkowePodloga\Tyl
+				if (Klasyfikacja ->GetItem(i) == OdlegloscOdScianyTyl and isNotSet2->IndexOf(i,1) == 0) or (isNotSet2->IndexOf(i,1) <> 0 and Klasyfikacja ->GetItem(i) == OdlegloscOdPoprzedzajacego) { //okreslenie strony, w ktora mierzy dany fotel
+					b = 1 //w tyl
+					planeTyl1 = System\DodatkowePodloga\Przod
+					planePrzod1 = System\DodatkowePodloga\Tyl
+				}
+				else{
+					b = -1 //w przod
+					planeTyl1 = System\DodatkowePodloga\Tyl
+					planePrzod1 = System\DodatkowePodloga\Przod
+				}
+			}
+			else{
+				a = -1 //w tyl
+				planePrzod = System\DodatkowePodloga\Tyl
+				planeTyl = System\DodatkowePodloga\Przod
+				if ( Klasyfikacja ->GetItem(i) == OdlegloscOdScianyTyl and isNotSet2->IndexOf(i,1) == 0) { //and isNotSet2->IndexOf(i,1) == 0) or (isNotSet2->IndexOf(i, 1) <> 0 and (Klasyfikacja ->GetItem(i) == OdlegloscOdPoprzedzajacego or Klasyfikacja ->GetItem(i) == OdlegloscSkierowanychDoSiebie)
+					b = -1 //w przod
+					planeTyl1 = System\DodatkowePodloga\Tyl
+					planePrzod1 = System\DodatkowePodloga\Przod
+					
+				}
+				else{
+					b = 1 //w tyl
+					planeTyl1 = System\DodatkowePodloga\Przod
+					planePrzod1 = System\DodatkowePodloga\Tyl
+				}
+			}
+			
+			f = surfList->GetItem(i-shift) //aktualnie mierzony fotel
+			if(Krok1Show1.GetItem(i + 1) == true){ //prawy z aktualnie mierzonej pary
+				f1 = surfList->GetItem(i-shift+1) //ten sam fotel co linijka wyzej
+				liH1dy = SzerokoscFotela //przesuwa liH1 na miejsce obok
+			}
+			else{
+				f1 = f //jesli nie ma drugiego fotela z pary zostawia domyslne
+				liH1dy = 0mm
+			}
+			planePr = plane(p, point(x+1mm,y,z), point(x, y, z+1mm)) //wzdluzna pionowa plaszczyzna z punktu p
+			fPr = CreateOrModifyDatum("Curve", Przekroje , Sys\MainKnowledge4Pattern\List.3 , 0)
+			set fPr = intersect(f, planePr)
+			
+			su1 = extrude(line(point(x + a*100 mm, y, z + 200 mm), direction(a,0,0), 0 mm,  400 mm, true) , direction(0,1,0), 5 mm, 5 mm, true) //powierzchnia pozioma waska nad fotelem
+			distz = distancedir(su1, f, direction(0,0,1)) //pomiar wysokosci
+			
+			//su = CreateOrModifyDatum("Surface", System\Pomocnicze1 , `Relations\Krok 4 - Sprawdzenie\List.3` , 0)
+			su = extrude(line(point(x + a*100 mm, y, z + 200 mm - distz), direction(a,0,0), 0 mm,  400 mm, true) , direction(0,1,0), 5 mm, 5 mm, true)
+			liV1 = line(point(x + a*300mm, y, z + 300mm), point(x + a*300mm, y, z - 1000mm)) //linia pionowa przed fotelem (czujka)
+			planePrzod2 = planeoffset(System\DodatkowePodloga\Przod, point(x + a*300mm, y, z)) //plane pionowy przed fotelem
+			distXZ = distance(planePrzod2, f)
+			
+			//liV2 = CreateOrModifyDatum("Surface", System\Pomocnicze1 , `Relations\Krok 4 - Sprawdzenie\List.3` , 0)
+			set liV2 = translate(liV1, direction(-a*1mm, 0mm, 0mm), distXZ) //linia pionowa przed fotelem (czujka)
+			
+			if(distance(liV2, podloga) == 0mm and distance(liV2, su) == 0mm){
+				StartZ = near(intersect(liV2, podloga), System\DodatkowePodloga\Gora)
+				set EndZ = intersect(liV2, su)
+				//MeasureZ = CreateOrModifyDatum("Line", open1 , `Relations\Krok 4 - Sprawdzenie\Measure` , 0)
+				Sys\measure.Run(StartZ, EndZ, open1, name + surname + "Z") //stworzone przez akcje nie usuwa sie po kazdym wykonaniu patternu
+				MeasureZ = line(StartZ, EndZ)
+				MeasureZ.Name = name + surname
+				set centerZ = translate(StartZ, direction(0mm,0mm,1mm), length(MeasureZ)/2) //TODO: zmienna = length(MeasureZ)/2
+				//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(length(MeasureZ) ,"mm") , point(centerZ->coord(1), centerZ->coord(2), centerZ->coord(3))) //tylko przez coordy		
+				if( length(MeasureZ) < WysokoscFotela - Tolerancja or length(MeasureZ) > WysokoscFotela + Tolerancja ) {
+					Message("Wymiar pionowy rzad " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i, 4)) + " nie spełnia wymogow homologacyjnych  [0x01]")
+					sh->SetCell(i+2, 9, "Wymiar pionowy rzad " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogow homologacyjnych  [0x01]")
+				}
+				if(mod(i,4) == 1){ //wpisanie w drzewo
+					myPocketPS = `Rzedy Lewa`
+					myPocketPS ->SetAttributeReal("z" + ToString(ceil(i/4)), length(MeasureZ))
+				}
+				else{
+					myPocketPS = `Rzedy Prawa`
+					myPocketPS ->SetAttributeReal("z" + ToString(ceil(i/4)) + "r", length(MeasureZ))
+				}
+				
+				len1 = List7.GetItem( int(ceil((4*(i ) - 3)/2)) + 2) //List7 ->SetItem(OdlegloscOdPoprzedzajacego, int(ceil((4*(i ) - 3)/2))) //skopiowane  z KP3
+				len2 = KorektaList .GetItem( int(ceil((4*(i ) - 3)/2)) + 2)
+				len3 = len1 - len2 + length(MeasureZ)
+				myList7->SetAttributeDimension("List7P."+ToString( int(ceil((4*(i ) - 3)/2)) + 2), len3, "LENGTH")
+			}
+			else{
+				//surfCheck = CreateOrModifyDatum("Surface", System\Pomocnicze , Sys\MainKnowledgePattern4\List.2  , 0)
+				surfCheck1 = extrude(extrude(point(x - a*Rbanki, y, z), direction(0mm,1mm,0mm), suLewo - Rbanki, suPrawo - Rbanki, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true) //4 rownolegle pionowe poprzeczne surfacy
+				surfCheck2 = extrude(extrude(point(x + a*Rbanki, y, z), direction(0mm,1mm,0mm), suLewo - Rbanki, suPrawo - Rbanki, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true)
+				surfCheck3 = extrude(extrude(point(x + 3*a*Rbanki, y, z), direction(0mm,1mm,0mm), suLewo - Rbanki, suPrawo - Rbanki, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true)
+				surfCheck4 = extrude(extrude(point(x + 5*a*Rbanki, y, z), direction(0mm,1mm,0mm), suLewo - Rbanki, suPrawo - Rbanki, false), direction(0mm,0mm,1mm), 2000mm, 2000mm, true)
+				surfCheck = assemble(surfCheck1, surfCheck2, surfCheck3, surfCheck4) //narzedzie do sprawdzania obecnosci podlogi
+				//suPoprzeczna = CreateOrModifyDatum("Surface", System\Pomocnicze2 , `Relations\Krok 4 - Sprawdzenie\List.3` , 0)
+				suPoprzeczna = extrude(liV2, direction(0mm, 1mm, 0mm), 400mm, 800mm, false)
+				//suPoprzeczna.Name = name + surname
+				
+				if(distance(suPoprzeczna, podloga) == 0mm){
+					int1 = intersect(suPoprzeczna, podloga)
+					plOffH = planeoffset( System\DodatkowePodloga\Gora, pointoncurveRatio(int1, point(0mm,0mm,0mm), 0, true))
+					StartZ = intersect(liV2, plOffH)
+					set EndZ = intersect(liV2, su)
+					//MeasureZ = CreateOrModifyDatum("Line", open1 , `Relations\Krok 4 - Sprawdzenie\Measure` , 0)
+					Sys\measure.Run(StartZ, EndZ, open1, name + surname + "Z")
+					MeasureZ = line(StartZ, EndZ)
+					MeasureZ.Name = name + surname
+					set centerZ = translate(StartZ, direction(0mm,0mm,1mm), length(MeasureZ)/2)
+					//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(length(MeasureZ) ,"mm") , point(centerZ->coord(1), centerZ->coord(2), centerZ->coord(3))) //tylko przez coordy		
+					if(length(MeasureZ) < WysokoscFotela - Tolerancja ){
+						Message("Wymiar pionowy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i, 4)) + " nie spełnia wymogów homologacyjnych [0x03]")
+						sh->SetCell(i+2, 9, "Wymiar pionowy rzad " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spelnia wymogow homologacyjnych [0x03]")
+					}
+					if(mod(i,4) == 1){ //jesli jest po lewej stronie
+						myPocketPS = `Rzedy Lewa`
+						myPocketPS ->SetAttributeReal("z" + ToString(ceil(i/4)), length(MeasureZ))
+					}
+					else{
+						myPocketPS = `Rzedy Prawa`
+						myPocketPS ->SetAttributeReal("z" + ToString(ceil(i/4)) + "r", length(MeasureZ))
+					}
+					
+					len1 = List7.GetItem( int(ceil((4*(i ) - 3)/2)) + 2) //List7 ->SetItem(OdlegloscOdPoprzedzajacego, int(ceil((4*(i ) - 3)/2))) //skopiowane  z KP3
+					len2 = KorektaList .GetItem( int(ceil((4*(i ) - 3)/2)) + 2)
+					len3 = len1 - len2 + length(MeasureZ)
+					myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2)) + 2), len3, "LENGTH")
+				}
+				else if(distance(surfCheck, podloga) < 100mm and distance(liV2, su) == 0mm){
+					//surfCheckUp = CreateOrModifyDatum("Surface", System\Pomocnicze2 , `Relations\Krok 4 - Sprawdzenie\List.3` , 0)
+					surfCheckUp = extrude(line(point(x, y-800mm, z), point(x, y + 400mm, z)), direction(1mm,0mm,0mm), 6*Rbanki, 3*Rbanki, a<0) //surfcheck1 tylko wyciagniete w poziomie
+					surfCheckUp.Name = "rzad " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4))
+					//surfCheckDown = CreateOrModifyDatum("Surface", Pomocnicze2, `Relations\Krok 4 - Sprawdzenie\List.3` , 0)
+					set surfCheckDown = translate(surfCheckUp, direction(0mm,0mm,-1mm), distance(surfCheckUp, near(podloga, liV2)))
+					
+					if(distance(liV2, surfCheckDown) == 0mm){
+						StartZ = near(intersect(liV2, surfCheckDown), System\DodatkowePodloga\Gora)
+					}
+					else{
+						Message("Błąd pomiaru [0x1a]")
+					}
+					set EndZ = intersect(liV2, su)
+					//MeasureZ = CreateOrModifyDatum("Line", open1 , `Relations\Krok 4 - Sprawdzenie\Measure` , 0)
+					Sys\measure.Run(StartZ, EndZ, open1, name + surname + "Z")
+					MeasureZ = line(StartZ, EndZ)
+					MeasureZ.Name = name + surname
+					set centerZ = translate(StartZ, direction(0mm,0mm,1mm), length(MeasureZ)/2)
+					//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(length(MeasureZ) ,"mm"), point(centerZ->coord(1), centerZ->coord(2), centerZ->coord(3))) //tylko przez coordy		
+					if(length(MeasureZ) < WysokoscFotela - Tolerancja ){
+						Message("Wymiar pionowy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i, 4)) + " nie spełnia wymogow homologacyjnych [0x03a]")
+						sh->SetCell(i+2, 9, "Wymiar pionowy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x03a]")
+					}
+					Notify("Podłoga dla rzędu ", ceil(i/4), ", fotela ", mod(i,4), " nie znajduje się w miejscu pomiaru. Może to wpływać na precyzję [0x04]")
+					sh->SetCell(i+1, 9, "Podłoga dla rzędu " + ceil(i/4) + ", fotela " + mod(i,4) + " nie znajduje się w miejscu pomiaru. Może to wpływać na precyzję [0x04]")
+					if(mod(i,4) == 1){ //jesli jest po lewej stronie
+						myPocketPS = `Rzedy Lewa`
+						myPocketPS ->SetAttributeReal("z" + ToString(ceil(i/4)), length(MeasureZ))
+					}
+					else{
+						myPocketPS = `Rzedy Prawa`
+						myPocketPS ->SetAttributeReal("z" + ToString(ceil(i/4)) + "r", length(MeasureZ))
+					}
+					
+					len1 = List7.GetItem( int(ceil((4*(i ) - 3)/2)) + 2) //List7 ->SetItem(OdlegloscOdPoprzedzajacego, int(ceil((4*(i ) - 3)/2))) //skopiowane  z KP3
+					len2 = KorektaList .GetItem( int(ceil((4*(i ) - 3)/2)) + 2)
+					len3 = len1 - len2 + length(MeasureZ)
+					myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2)) + 2), len3, "LENGTH")
+				}
+				else{
+					Notify("Brak podlogi dla rzedu ", ceil(i/4), ", fotela ", mod(i,4), " [0x04a]")
+					sh->SetCell(i+1, 9, "Brak podlogi dla rzedu " + ceil(i/4) +", fotela "+ mod(i,4) + " [0x04a]")
+					podlogaUstawiona = false
+				}	
+			}
+			if(Klasyfikacja ->GetItem(i) == OdlegloscOdSciany and podlogaUstawiona == true){ //pomiar w X
+				
+				//liH1 = CreateOrModifyDatum("Line", Pomocnicze2 , `Relations\Krok 4 - Sprawdzenie\List.3`   , 0)
+				liH1 = line(point(x - a*300mm, y, EndZ->coord(3)), point(x + a*800mm, y, EndZ->coord(3)))
+				
+				if(distance(liH1, sciany) == 0mm){ //sprawdzenie czy lewy fotel trafia na sciane
+					
+					StartX = EndZ
+					EndX = near(intersect(liH1, sciany), planeTyl)
+					//MeasureX = CreateOrModifyDatum("Line", open1, `Relations\Krok 4 - Sprawdzenie\Measure` , 0)
+					Sys\measure.Run(StartX, EndX, open1, name + surname + "X1")
+					MeasureX = line(StartX, EndX)
+					MeasureX.Name = name + surname	 					
+					set centerX = translate(StartX, direction(a*1mm,0mm,0mm), length(MeasureX)/2)
+					//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(length(MeasureX) ,"mm") , point(centerX->coord(1), centerX->coord(2), centerX->coord(3)))
+					if( length(MeasureX) < OdlegloscOdSciany - Tolerancja ){
+						Message("Wymiar poziomy rzad " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogow homologacyjnych [0x05]")
+						sh->SetCell(i+2, 10, "Wymiar poziomy rzad " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogow homologacyjnych [0x05]")
+					}
+					if(mod(i,4) == 1){ //jesli jest po lewej stronie
+						myPocketPS = `Rzedy Lewa`
+						myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)), length(MeasureX))
+					}
+					else{
+						myPocketPS = `Rzedy Prawa`
+						myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)) + "r", length(MeasureX))
+					}
+					
+					len1 = List7.GetItem( int(ceil((4*(i ) - 3)/2) )) //List7 ->SetItem(OdlegloscOdPoprzedzajacego, int(ceil((4*(i ) - 3)/2))) //skopiowane  z KP3
+					len2 = KorektaList .GetItem( int(ceil((4*(i ) - 3)/2)))
+					len3 = len1 - len2 + length(MeasureX)
+					myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2))), len3, "LENGTH")
+				}
+				else{
+					//pow = CreateOrModifyDatum("Surface", Pomocnicze2 , `Relations\Krok 4 - Sprawdzenie\List.3`  , 0)
+					//pow = extrude(line(point(x + a*300mm, y -  powLewoDoPrzodu, z - 100mm), point(x + a*300mm, y + powPrawo, z - 100mm)), direction(0mm,0mm,1mm), 300mm, 500mm, true)
+					pow = extrude(line(point(x + a*300mm, y +  powLewoDoPrzodu, z - 100mm), point(x + a*300mm, y - powPrawo, z - 100mm)), direction(0mm,0mm,1mm), 300mm, 500mm, true)
+					//surfCheck = CreateOrModifyDatum("Surface", Pomocnicze2 , `Relations\Krok 4 - Sprawdzenie\List.3`  , 0)
+					surfCheck1 = extrude(extrude(point(x, y, z - 3*Rbanki), direction(0mm,1mm,0mm), powLewoDoPrzodu - Rbanki, powPrawo - Rbanki, false), direction(1mm,0mm,0mm), 0mm, 800mm, a>0) //4 rownolegle pionowe poprzeczne surfacy
+					surfCheck2 = extrude(extrude(point(x, y, z - Rbanki), direction(0mm,1mm,0mm), powLewoDoPrzodu - Rbanki, powPrawo - Rbanki, false), direction(1mm,0mm,0mm), 0mm, 800mm, a>0)
+					surfCheck3 = extrude(extrude(point(x, y, z + Rbanki), direction(0mm,1mm,0mm), powLewoDoPrzodu - Rbanki, powPrawo - Rbanki, false), direction(1mm,0mm,0mm), 0mm, 800mm, a>0)
+					surfCheck4 = extrude(extrude(point(x, y, z + 3*Rbanki), direction(0mm,1mm,0mm), powLewoDoPrzodu - Rbanki, powPrawo - Rbanki, false), direction(1mm,0mm,0mm), 0mm, 800mm, a>0)
+					surfCheck = assemble( surfCheck1, surfCheck2, surfCheck3, surfCheck4) //narzedzie do sprawdzania obecnosci sciany
+					
+					if(distance(surfCheck, sciany) < Rbanki){
+						set EndX = translate(intersect(liH1, pow), direction(a*1mm, 0mm,0mm), distancedir(pow, sciany, direction(1mm,0mm,0mm)))
+						StartX = project(EndX, planeoffset(planePrzod2, distXZ, a<0))
+						//MeasureX = CreateOrModifyDatum("Line", open1 , `Relations\Krok 4 - Sprawdzenie\Measure`  , 0)
+						Sys\measure.Run(StartX, EndX, open1, name + surname + "X3")
+						MeasureX = line(StartX, EndX)
+						MeasureX.Name = name + surname						
+						set centerX = translate(StartX, direction(a*1mm,0mm,0mm), length(MeasureX)/2)
+						//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(length(MeasureX) ,"mm"), point(centerX->coord(1), centerX->coord(2), centerX->coord(3))) //tworzenie nowego punktu, inaczej VB nie czyta
+						if( length(MeasureX) < OdlegloscOdSciany - Tolerancja ){
+							Message("Wymiar poziomy rzad " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogow homologacyjnych [0x06]")
+							sh->SetCell(i+2, 10, "Wymiar poziomy rzad " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogow homologacyjnych [0x06a]")
+						}
+						if(mod(i,4) == 1){ //jesli jest po lewej stronie
+							myPocketPS = `Rzedy Lewa`
+							myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)), length(MeasureX))
+						}
+						else{
+							myPocketPS = `Rzedy Prawa`
+							myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)) + "r", length(MeasureX))
+						}
+						
+						len1 = List7.GetItem(int(ceil((4*(i ) - 3)/2)))
+						len2 = KorektaList.GetItem(int(ceil((4*(i ) - 3)/2)))
+						len3 = len1 - len2 + length(MeasureX)
+						myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2))), len3, "LENGTH")
+					}
+					else{
+						Notify("Brak sciany: rzad ", ceil(i/4), ". Fotel ", mod(i,4), " [0x06b]")
+						sh->SetCell(i+1, 10, "Brak sciany: rzad " + ceil(i/4) + ". Fotel " + mod(i,4) + " [0x06b]")
+					}
+				}
+			}
+			else if(Klasyfikacja ->GetItem(i) == OdlegloscOdPoprzedzajacego and podlogaUstawiona == true ){
+				
+				//liH1 = CreateOrModifyDatum("Line", Pomocnicze2 , `Relations\Krok 4 - Sprawdzenie\List.3` , 0)
+				liH1 = line(point(x + b*300mm, y - 0.05mm , StartZ->coord(3) + 620mm), point(x - b*1200mm, y - 0.05mm, StartZ->coord(3) + 620mm)) //0.05mm - odsuniecie sie od srodka fotela zawierajacego bledy
+				suPrzekr = extrude(liH1, direction(0mm,0mm,1mm), 0mm, 70mm, false)
+				//liH1.Name = "Rzad" + fName + fSurname
+				fName = f.Name
+				if(fName->Search(" Lewa") > 0){
+					fSurname = " Lewa"
+				}
+				if(fName->Search("Prawa") > 0){
+					fSurname = "Prawa"
+				}
+				fName = ToString(ReplaceSubText(ReplaceSubText(ReplaceSubText(fName , "Rzad", ""), " Lewa", ""), "Prawa", "")->ToReal() + b) //pozostawienie samej liczby i odpowiednio jej zwiekszenie lub zmniejszenie
+				searchStr = "x.Name == " + "\"" + "Rzad" + fName + fSurname + "\"" //st
+				//g = CreateOrModifyDatum("Surface", Pomocnicze1 , `Relations\Krok 4 - Sprawdzenie\List.2` , 0)
+				g = Korekta  ->Find("Surface", searchStr, true) //odniesienie
+				
+				if(distance(liH1, g) == 0mm and distance(liH1, f) == 0mm){
+					StartX = near(intersect(liH1, g), planeTyl1)
+					EndX = near(intersect(liH1, f), planePrzod1)
+					//MeasureX = CreateOrModifyDatum("Line", open1 , `Relations\Krok 4 - Sprawdzenie\Measure` , 0)
+					Sys\measure.Run(StartX, EndX, open1, name + surname + "X4")
+					MeasureX = line(StartX, EndX)
+					MeasureX.Name = name + surname										
+					set centerX = translate(StartX, direction(b*1mm,0mm,0mm), length(MeasureX)/2)
+					//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(length(MeasureX) ,"mm"), point(centerX->coord(1), centerX->coord(2), centerX->coord(3)))
+					if(length(MeasureX) < OdlegloscOdPoprzedzajacego - Tolerancja ){
+						Message("Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x07]")
+						sh->SetCell(i+2, 9, "Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x07]")
+					}
+					if(mod(i,4) == 1){ //jesli jest po lewej stronie
+						myPocketPS = `Rzedy Lewa`
+						myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)), length(MeasureX))
+					}
+					else{
+						myPocketPS = `Rzedy Prawa`
+						myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)) + "r", length(MeasureX))
+					}
+					
+					len1 = List7.GetItem(int(ceil((4*(i ) - 3)/2)))
+					len2 = KorektaList .GetItem(int(ceil((4*(i ) - 3)/2)))
+					len3 = len1 - len2 + length(MeasureX)
+					myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2))), len3, "LENGTH")
+				}
+				else if(distance(suPrzekr, g) == 0mm and distance(suPrzekr, f) == 0mm){
+					if(distance(System\DodatkowePodloga\Dol , g) < distance(System\DodatkowePodloga\Dol , f)){ //jesli odniesienie nizej
+						int1 = CreateOrModifyDatum("Curve", System\Pomocnicze   ,Sys\MainKnowledge4Pattern\List.2  , 0)
+						int1 = near(intersect(suPrzekr, f), g) //przekroj gornego fotela
+						//int2 = CreateOrModifyDatum("Curve", Pomocnicze2  ,`Relations\Krok 4 - Sprawdzenie\List.3` , 0)
+						set int2 = translate(int1, direction(-b*1mm, 0mm,0mm), distancedir(int1, g, direction(1mm, 0mm, 0mm) ) + 0.1mm) //przesuniety do dolnego
+						if (distance(int2, g) == 0mm){
+							StartX = near(intersect(int2, g), System\DodatkowePodloga\Gora)
+						}
+					}
+					else{
+						int1 = near(intersect(suPrzekr, g), f)
+						//int2 = CreateOrModifyDatum("Curve", Pomocnicze2  ,`Relations\Krok 4 - Sprawdzenie\List.3` , 0)
+						set int2 = translate(int1, direction(b*1mm, 0mm,0mm), distancedir(int1, f, direction(1mm, 0mm, 0mm)) + 0.1mm)
+						if (distance(int2, f) == 0mm){
+							StartX = near(intersect(int2, f), System\DodatkowePodloga\Gora)
+						}
+					}
+					pom1 = extrude(StartX, direction(a*1mm,0mm,0mm), 2000mm,2000mm, true)
+					if (distance(pom1, f) == 0mm){
+						EndX = near(intersect(pom1, f), planePrzod1)
+					}
+					//MeasureX = CreateOrModifyDatum("Line", open1 , `Relations\Krok 4 - Sprawdzenie\Measure` , 0)
+					Sys\measure.Run(StartX, EndX, open1, name + surname + "X5")
+					MeasureX = line(StartX, EndX)
+					MeasureX.Name = name + surname										
+					set centerX = translate(StartX, direction(b*1mm,0mm,0mm), length(MeasureX)/2)
+					//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(length(MeasureX) ,"mm"), point(centerX->coord(1), centerX->coord(2), centerX->coord(3)))
+					if(length(MeasureX) < OdlegloscOdPoprzedzajacego - Tolerancja ){
+						Message("Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x07a]")
+						sh->SetCell(i+2, 10, "Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x07a]")
+					}
+					if(mod(i,4) == 1){//jesli jest po lewej stronie
+						myPocketPS = `Rzedy Lewa`
+						myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)), length(MeasureX))
+					}
+					else{
+						myPocketPS = `Rzedy Prawa`
+						myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)) + "r", length(MeasureX))
+					}
+					
+					len1 = List7.GetItem(int(ceil((4*(i ) - 3)/2)))
+					len2 = KorektaList .GetItem(int(ceil((4*(i ) - 3)/2)))
+					len3 = len1 - len2 + length(MeasureX)
+					myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2))), len3, "LENGTH")
+				}
+				else{ //sprawdzenie drugiej strony danej pary
+					//liH1 = CreateOrModifyDatum("Line", System\Pomocnicze  ,Sys\MainKnowledgePattern4\List.2  , 0)
+					liH1 = line(point(x + b*300mm, y - liH1dy , StartZ->coord(3) + 620mm), point(x - b*1200mm, y - liH1dy , StartZ->coord(3) + 620mm))
+					suPrzekr = extrude(liH1, direction(0mm,0mm,1mm), 0mm, 70mm, false)
+					//liH1.Name = "Rzad" + fName + fSurname
+					fName = f.Name
+					if(fName->Search(" Lewa") > 0){
+						fSurname = " Lewa"
+					}
+					if(fName->Search("Prawa") > 0){
+						fSurname = "Prawa"
+					}
+					fName = ToString(ReplaceSubText(ReplaceSubText(ReplaceSubText(fName , "Rzad", ""), " Lewa", ""), "Prawa", "")->ToReal() + b) //pozostawienie samej liczby i odpowiednio jej zwiekszenie lub zmniejszenie
+					if(liH1dy == 0mm){ //patrz liH1dy na poczatku petli
+						searchStr = "x.Name == " + "\"" + "Rzad" + fName + fSurname + "R" + "\"" //prawy fotel z pary
+					}
+					else{
+						searchStr = "x.Name == " + "\"" + "Rzad" + fName + fSurname + "\"" //lewy fotel
+					}
+					//g = CreateOrModifyDatum("Surface", System\Pomocnicze  , Sys\MainKnowledgePattern4\List.2  , 0)
+					g = Korekta  ->Find("Surface", searchStr, true) //odniesienie
+					if(g == NULL){
+						searchStr = "x.Name == " + "\"" + "Rzad" + fName + fSurname + "\""
+						g = Korekta  ->Find("Surface", searchStr, true) //odniesienie lewa z pary
+					}
+					if(distance(liH1, g) == 0mm and distance(liH1, f1) == 0mm){ //linia
+						StartX = near(intersect(liH1, g), planeTyl1)
+						EndX = near(intersect(liH1, f1), planePrzod1)
+						//MeasureX = CreateOrModifyDatum("Line", open1 , `Relations\Krok 4 - Sprawdzenie\Measure` , 0)
+						Sys\measure.Run(StartX, EndX, open1, name + surname + "X4")
+						MeasureX = line(StartX, EndX)
+						MeasureX.Name = name + surname										
+						set centerX = translate(StartX, direction(b*1mm,0mm,0mm), length(MeasureX)/2)
+						//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(length(MeasureX) ,"mm"), point(centerX->coord(1), centerX->coord(2), centerX->coord(3)))
+						if(length(MeasureX) < OdlegloscOdPoprzedzajacego - Tolerancja ){
+							Message("Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x07]")
+							sh->SetCell(i+2, 9, "Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x07]")
+						}
+						if(mod(i,4) == 1){ //jesli jest po lewej stronie
+							myPocketPS = `Rzedy Lewa`
+							myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)), length(MeasureX))
+						}
+						else{
+							myPocketPS = `Rzedy Prawa`
+							myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)) + "r", length(MeasureX))
+						}
+						
+						len1 = List7.GetItem(int(ceil((4*(i ) - 3)/2)))
+						len2 = KorektaList .GetItem(int(ceil((4*(i ) - 3)/2)))
+						len3 = len1 - len2 + length(MeasureX)
+						myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2))), len3, "LENGTH")
+					}
+					else if(distance(suPrzekr, g) == 0mm and distance(suPrzekr, f1) == 0mm){ //powierzchnia
+						if(distance(System\DodatkowePodloga\Dol , g) < distance(System\DodatkowePodloga\Dol , f)){ //jesli odniesienie nizej
+							int1 = near(intersect(suPrzekr, f1), g) //przekroj gornego fotela
+							//int2 = CreateOrModifyDatum("Curve", Pomocnicze2  ,`Relations\Krok 4 - Sprawdzenie\List.3` , 0)
+							set int2 = translate(int1, direction(-b*1mm, 0mm,0mm), distancedir(int1, g, direction(1mm, 0mm, 0mm) ) + 0.1mm) //przesuniety do dolnego
+							if (distance(int2, g) == 0mm){
+								StartX = near(intersect(int2, g), System\DodatkowePodloga\Gora)
+							}
+						}
+						else{
+							int1 = near(intersect(suPrzekr, g), f1)
+							//int2 = CreateOrModifyDatum("Curve", Pomocnicze2  ,`Relations\Krok 4 - Sprawdzenie\List.3` , 0)
+							set int2 = translate(int1, direction(b*1mm, 0mm,0mm), distancedir(int1, f, direction(1mm, 0mm, 0mm)) + 0.1mm)
+							if (distance(int2, f1) == 0mm){
+								StartX = near(intersect(int2, f1), System\DodatkowePodloga\Gora)
+							}
+						}
+						pom1 = extrude(StartX, direction(a*1mm,0mm,0mm), 2000mm,2000mm, true)
+						if (distance(pom1, f1) == 0mm){
+							EndX = near(intersect(pom1, f1), planePrzod1)
+						}
+						//MeasureX = CreateOrModifyDatum("Line", open1 , `Relations\Krok 4 - Sprawdzenie\Measure` , 0)
+						Sys\measure.Run(StartX, EndX, open1, name + surname + "X5")
+						MeasureX = line(StartX, EndX)
+						MeasureX.Name = name + surname										
+						set centerX = translate(StartX, direction(b*1mm,0mm,0mm), length(MeasureX)/2)
+						//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(length(MeasureX) ,"mm"), point(centerX->coord(1), centerX->coord(2), centerX->coord(3)))
+						if(length(MeasureX) < OdlegloscOdPoprzedzajacego - Tolerancja ){
+							Message("Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x07a]")
+							sh->SetCell(i+2, 10, "Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x07a]")
+						}
+						if(mod(i,4) == 1){ //jesli jest po lewej stronie
+							myPocketPS = `Rzedy Lewa`
+							myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)), length(MeasureX))
+						}
+						else{
+							myPocketPS = `Rzedy Prawa`
+							myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)) + "r", length(MeasureX))
+						}
+						
+						len1 = List7.GetItem(int(ceil((4*(i ) - 3)/2)))
+						len2 = KorektaList .GetItem(int(ceil((4*(i ) - 3)/2)))
+						len3 = len1 - len2 + length(MeasureX)
+						myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2))), len3, "LENGTH")
+					}
+					else{
+						Notify("Brak fotela odniesienia: rząd ", ceil(i/4), ". Fotel ", mod(i, 4),  " [0x07b]")
+						sh->SetCell(i+1, 10, "Brak fotela odniesienia: rząd " + ceil(i/4) + ". Fotel " + mod(i, 4) + " [0x07b]")
+					}
+				}				
+			}	
+			else if(Klasyfikacja->GetItem(i) == OdlegloscSkierowanychDoSiebie and podlogaUstawiona == true){
+				
+				fName = f.Name
+				if(fName->Search(" Lewa") > 0){
+					fSurname = " Lewa"
+				}
+				if(fName->Search("Prawa") > 0){
+					fSurname = "Prawa"
+				}
+				fName = ToString(ReplaceSubText(ReplaceSubText(ReplaceSubText(fName , "Rzad", ""), " Lewa", ""), "Prawa", "")->ToReal() + b)
+				searchStr = "x.Name == " + "\"" + "Rzad" + fName + fSurname + "\""
+				//g = CreateOrModifyDatum("Surface", Pomocnicze1 , `Relations\Krok 4 - Sprawdzenie\List.2` , 0)
+				g = Korekta -> Find("Surface", searchStr, true)
+				//g.Name = "Rzad" + fName + fSurname
+				
+				g.centerofgravity(gx,gy,gz)
+				//su2 = CreateOrModifyDatum("Surface", System\Pomocnicze2, Sys\MainKnowledgePattern4\List.2  , 0)
+				su2 = extrude(line(point(gx - a*100 mm, gy, gz + 200 mm), direction(-a,0,0), 0 mm,  400 mm, true) , direction(0,1,0), 15 mm, 15 mm, true)
+				distz2 = gz + 200mm - distancedir(g, su2, direction(0mm, 0mm, 1mm)) // wysokosc g
+				distz3 = z + 200mm - distz //f
+				diff = distz2 - distz3
+				
+				//liHg = CreateOrModifyDatum("Line", System\Pomocnicze, Sys\MainKnowledge4Pattern\List.2 , 0)
+				//liHf = CreateOrModifyDatum("Line", System\Pomocnicze, Sys\MainKnowledge4Pattern\List.2 , 0)
+				liHg = line(point(x + b*300mm, y - 0.05mm, distz2 + 21mm), point(x - b*2000mm, y - 0.05mm, distz2 + 21mm)) //0.05mm bo trafia na szpare miedzy extractami fotela //21mm bo przy pochyleniu fotela trafialo na siedzisko
+				liHf = line(point(x + b*300mm, y - 0.05mm, distz3 + 21mm), point(x - b*2000mm, y - 0.05mm, distz3 + 21mm))
+				
+				if(distance(liHg, g) == 0mm and distance(liHf, f) == 0mm){
+					StartX = near(intersect(liHg, g), planeTyl)
+					EndXf = near( intersect(liHf, f), planePrzod)
+					set EndX = translate(EndXf, direction(0mm,0mm,1mm), diff)
+					Sys\measure.Run(StartX, EndX, open1, name + surname + "X6")
+					MeasureX = line(StartX, EndX)
+					MeasureX.Name = name + surname
+					Sys\measure.Run(EndXf, EndX, open1, name + surname + "X10")							
+					set centerX = translate(StartX, direction(-a*1mm,0mm,0mm), length(MeasureX)/2)
+					//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(length(MeasureX) ,"mm") , point(centerX->coord(1), centerX->coord(2), centerX->coord(3)))
+					if(length(MeasureX) < OdlegloscSkierowanychDoSiebie - Tolerancja ){
+						Message("Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x08]")
+						sh->SetCell(i+2, 10, "Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x08]")
+					}
+					if(mod(i,4) == 1){ //jesli jest po lewej stronie
+						myPocketPS = `Rzedy Lewa`
+						myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)), length(MeasureX))
+					}
+					else{
+						myPocketPS = `Rzedy Prawa`
+						myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)) + "r", length(MeasureX))
+					}
+					
+					len1 = List7.GetItem(int(ceil((4*(i ) - 3)/2)))
+					len2 = KorektaList .GetItem(int(ceil((4*(i ) - 3)/2)))
+					len3 = len1 - len2 + length(MeasureX)
+					myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2))), len3, "LENGTH")
+				}
+				else{
+					fName = f.Name
+					if(fName->Search(" Lewa") > 0){
+						fSurname = " Lewa"
+					}
+					if(fName->Search("Prawa") > 0){
+						fSurname = "Prawa"
+					}
+					fName = ToString(ReplaceSubText(ReplaceSubText(ReplaceSubText(fName , "Rzad", ""), " Lewa", ""), "Prawa", "")->ToReal() + b)
+					if(liH1dy == 0mm){ //patrz liH1dy na poczatku petli
+						searchStr = "x.Name == " + "\"" + "Rzad" + fName + fSurname + "R" + "\"" //prawy fotel
+					}
+					else{
+						searchStr = "x.Name == " + "\"" + "Rzad" + fName + fSurname + "\"" //lewy fotel z pary
+					}
+					//g = CreateOrModifyDatum("Surface", Pomocnicze1 , `Relations\Krok 4 - Sprawdzenie\List.2` , 0)
+					g = Korekta  ->Find("Surface", searchStr, true)
+					if(g == NULL){
+						searchStr = "x.Name == " + "\"" + "Rzad" + fName + fSurname + "\""
+						g = Korekta  ->Find("Surface", searchStr, true) //odniesienie lewa z pary
+					}
+					//g.Name = "Rzad" + fName + fSurname
+					
+					g.centerofgravity(gx,gy,gz)
+					//su2 = CreateOrModifyDatum("Surface", System\Pomocnicze2, Sys\MainKnowledgePattern4\List.2  , 0)
+					su2 = extrude(line(point(gx - a*100 mm, gy, gz + 200 mm), direction(-a,0,0), 0 mm,  400 mm, true) , direction(0,1,0), 15 mm, 15 mm, true)
+					distz2 = gz + 200mm - distancedir(g, su2, direction(0mm, 0mm, 1mm))
+					if(distz2 < z + 200mm - distz){
+						distz2 = z + 200mm - distz
+					}
+					//liH1 = CreateOrModifyDatum("Line", System\Pomocnicze2, Sys\MainKnowledgePattern4\List.2 , 0)
+					liH1 = line(point(x + b*300mm, y - 0.05mm - liH1dy, distz2 + 21mm), point(x - b*2000mm, y - 0.05mm - liH1dy, distz2 + 21mm)) //0.05mm bo trafia na szpare miedzy extractami fotela //21mm bo przy pochyleniu fotela trafialo na siedzisko
+					
+					if(distance(liH1, g) == 0mm and distance(liH1, f) == 0mm){
+						StartX = near(intersect(liH1, g), planeTyl)
+						EndX = near( intersect(liH1, f), planePrzod)
+						//MeasureX = CreateOrModifyDatum("Line", open1 , `Relations\Krok 4 - Sprawdzenie\Measure` , 0)
+						Sys\measure.Run(StartX, EndX, open1, name + surname + "X6")
+						MeasureX = line(StartX, EndX)
+						MeasureX.Name = name + surname							
+						set centerX = translate(StartX, direction(-a*1mm,0mm,0mm), length(MeasureX)/2)
+						//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(length(MeasureX) ,"mm") , point(centerX->coord(1), centerX->coord(2), centerX->coord(3)))
+						if(length(MeasureX) < OdlegloscSkierowanychDoSiebie - Tolerancja ){
+							Message("Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x08]")
+							sh->SetCell(i+2, 10, "Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x08]")
+						}
+						if(mod(i,4) == 1){ //jesli jest po lewej stronie
+							myPocketPS = `Rzedy Lewa`
+							myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)), length(MeasureX))
+						}
+						else{
+							myPocketPS = `Rzedy Prawa`
+							myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)) + "r", length(MeasureX))
+						}
+						
+						len1 = List7.GetItem(int(ceil((4*(i ) - 3)/2)))
+						len2 = KorektaList .GetItem(int(ceil((4*(i ) - 3)/2)))
+						len3 = len1 - len2 + length(MeasureX)
+						myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2))), len3, "LENGTH")
+					}
+					else{
+						Notify("Brak fotela odniesienia: rząd ", ceil(i/4), ". Fotel ", mod(i,4))
+						sh->SetCell(i+1, 10, "Brak fotela odniesienia: rząd " + ceil(i/4) + ". Fotel " + mod(i,4) + " [0x08a]")
+					}
+				}
+			}
+			else if(Klasyfikacja->GetItem(i) == OdlegloscOdScianyTyl ){
+				
+				//planeTyl2 = CreateOrModifyDatum("Plane", System\Pomocnicze2, `Relations\Krok 4 - Sprawdzenie\List.2`, 0)
+				planeTyl2 = planeoffset(planeTyl, distance(planeTyl , f), a>0)
+				//liH1 = CreateOrModifyDatum("Line", System\Pomocnicze2, `Relations\Krok 4 - Sprawdzenie\List.2`, 0)
+				liH1 = line(point(x, y , z + 510mm), direction(1mm,0mm,0mm), -500mm, 500mm, true)
+				
+				//suPoprz1 = CreateOrModifyDatum("Surface", System\Pomocnicze2, Sys\MainKnowledgePattern4\List.2 , 0)
+				if(distance(liH1, planeTyl2) == 0mm){
+					suPoprz1 = extrude(extrude(intersect(liH1, planeTyl2), direction(0mm,0mm,1mm),1000mm,1000mm,true), direction(0mm,1mm,0mm),800mm,500mm,true)
+				}
+				//suPoprz1.Name  = "suPoprz1"
+				
+				if(distance(liH1, sciany) == 0mm and distance(liH1, planeTyl2) == 0mm ){
+					
+					StartX = near(intersect(liH1, sciany), planePrzod1)
+					EndX = near(intersect(liH1, planeTyl2), planeTyl1)
+					//MeasureX = CreateOrModifyDatum("Line", open1 , `Relations\Krok 4 - Sprawdzenie\Measure` , 0)
+					Sys\measure.Run(StartX, EndX, open1, name + surname + "X7")
+					MeasureX = line(StartX, EndX)
+					MeasureX.Name = name + surname	
+					DistValue = length(MeasureX)					
+					set centerX = translate(StartX, direction(0mm,0mm,1mm), WysokoscFotela/2)
+					centerVB = point(centerX->coord(1), centerX->coord(2), centerX->coord(3))
+					//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(DistValue ,"mm") , centerVB)
+					if( length(MeasureX) < OdlegloscOdScianyTyl - Tolerancja ){
+						Message("Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x09]")
+						sh->SetCell(i+2, 10, "Wymiar poziomy rząd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogów homologacyjnych [0x09]")
+					}
+					if(mod(i,4) == 1){//jesli jest po lewej stronie
+						myPocketPS = `Rzedy Lewa`
+						myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)), length(MeasureX))
+					}
+					else{
+						myPocketPS = `Rzedy Prawa`
+						myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)) + "r", length(MeasureX))
+					}
+					
+					len1 = List7.GetItem(int(ceil((4*(i ) - 3)/2)))
+					len2 = KorektaList .GetItem(int(ceil((4*(i ) - 3)/2)))
+					len3 = len1 - len2 + length(MeasureX)
+					myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2))), len3, "LENGTH")
+				}
+				else if(distance(line(point(x, y, z + 510mm),direction(1mm,0mm,0mm), -500mm, 500mm, true), suPoprz1) == 0mm ){
+					//scianaTyl = CreateOrModifyDatum("Surface", System\Pomocnicze2, Sys\MainKnowledgePattern4\List.2 , 0)
+					if(distance(suPoprz1,sciany) > 0mm){
+						set scianaTyl = translate(suPoprz1, direction(-a*1mm, 0mm,0mm), distance(suPoprz1,sciany))
+					}
+					else{
+						set scianaTyl = translate(suPoprz1, direction(-a*1mm, 0mm,0mm), distance(suPoprz1,sciany) + 0.05mm)
+					}
+					linePom1 = line(point(x, y, z + 510mm),direction(1mm,0mm,0mm), -500mm, 500mm, true)
+					if(distance(linePom1, scianaTyl) == 0mm and distance(linePom1, planeTyl2) == 0mm ){
+						StartX = intersect(linePom1, scianaTyl)
+						EndX = near(intersect(linePom1, planeTyl2), planePrzod)
+						//MeasureX = CreateOrModifyDatum("Line", open1 , `Relations\Krok 4 - Sprawdzenie\Measure`, 0)
+						Sys\measure.Run(StartX, EndX, open1, name + surname + "X8")
+						MeasureX = line(StartX, EndX)
+						MeasureX.Name = name + surname	
+						DistValue = length(MeasureX)						
+						set centerX = translate(StartX, direction(0mm,0mm,1mm), WysokoscFotela/2)
+						centerVB = point(centerX->coord(1), centerX->coord(2), centerX->coord(3))
+						//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(DistValue ,"mm") , centerVB)
+						if( length(MeasureX) < OdlegloscOdScianyTyl - Tolerancja ){
+							Message("Wymiar poziomy rzd " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogow homologacyjnych [0x10]")
+							sh->SetCell(i+2, 10, "Wymiar poziomy rzad " + ToString(ceil(i/4)) + " fotel " + ToString(mod(i,4)) + " nie spełnia wymogow homologacyjnych [0x10]")
+						}
+						if(mod(i,4) == 1){ //jesli jest po lewej stronie
+							myPocketPS = `Rzedy Lewa`
+							myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)), length(MeasureX))
+						}
+						else{
+							myPocketPS = `Rzedy Prawa`
+							myPocketPS ->SetAttributeReal("x" + ToString(ceil(i/4)) + "r", length(MeasureX))
+						}
+						
+						len1 = List7.GetItem(int(ceil((4*(i ) - 3)/2)))
+						len2 = KorektaList .GetItem(int(ceil((4*(i ) - 3)/2)))
+						len3 = len1 - len2 + length(MeasureX)
+						myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*(i ) - 3)/2))), len3, "LENGTH")
+					}
+				}
+				else{
+					Notify("Brak sciany: rząd ", ceil(i/4), ". Fotel ", mod(i,4), " [0x0b]")
+					sh->SetCell(i+1, 10, "Brak sciany: rząd " + ceil(i/4) + ". Fotel " + mod(i,4) + " [0x0b]")
+				}
+			}
+			else{
+				Notify("Błąd związany z klasyfikacją lub podłogą: ", Klasyfikacja ->GetItem(i), " Rząd ", ceil(i/4), ". Fotel ", mod(i,4), " [0x0c]")
+				sh->SetCell(i+1, 10, "Błąd związany z klasyfikacją lub podłogą: " + Klasyfikacja ->GetItem(i)  +  " Rząd " + ceil(i/4) + ". Fotel " + mod(i,4) + " [0x0c]")
+			}
+			if i < Sys\Krok1Show1Size - 4{
+				
+				if(Krok1Show1 .GetItem(i+4) == true and a == 1 and Krok1Angle1 .GetItem(i + 4) == 180 ){ // jesli sa widoczne i sa tylem
+					fName = f.Name
+					if(fName->Search(" Lewa") > 0){
+						fSurname = " Lewa"
+					}
+					if(fName->Search("Prawa") > 0){
+						fSurname = "Prawa"
+					}
+					fName = ToString(ReplaceSubText(ReplaceSubText(ReplaceSubText(fName , "Rzad", ""), " Lewa", ""), "Prawa", "")->ToReal() + 1)
+					searchStr = "x.Name == " + "\"" + "Rzad" + fName + fSurname + "\""
+					//g = CreateOrModifyDatum("Surface", Pomocnicze1 , `Relations\Krok 4 - Sprawdzenie\List.2` , 0)
+					g = Korekta  ->Find("Surface", searchStr, true)
+					
+					PlaneTylf = planeoffset(planeTyl , distance(planeTyl , f), true)
+					PlaneTylg = planeoffset(planePrzod , distance(planePrzod , g), false)
+					
+					StartX = pointonplane(PlaneTylf,p,0mm,510mm)
+					EndX = pointonplane(PlaneTylg,p,0mm,510mm)
+					//MeasureXX = CreateOrModifyDatum("Line", open1 , `Relations\Krok 4 - Sprawdzenie\Measure` , 0)
+					Sys\measure.Run(StartX, EndX, open1, name + surname + "X9")
+					MeasureXX = line(StartX, EndX)
+					MeasureXX.Name = name + surname
+					centerVB = pointoncurveRatio(MeasureXX,point(0mm,0mm,0mm), 0.5, true)
+					//`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(length(MeasureX) ,"mm") , centerVB)
+				}
+			}
+		}
+	}
+	else{
+		//shift = shift + 1
+	}
+}
+dt.Activity = true
+
+Measure1 .Show = true
+Measure .Show = true
+Fotele .Show = false
+Korekta .Show = true	
+
+i = 1 //zerowanie KorektaList - wszystkie wymiary zostają uznane za aktualne uznane po wykonaniu kroku 4
+for i while i <= ceil(Sys\Knowledge1Pattern\PunktyFotel .Size()/4){ //wpisywanie z drzewa do korekta list
+	myPocketPS = `Rzedy Lewa`
+	myValue = myPocketPS ->GetAttributeReal("x" + ToString(i))*1000mm
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-7), myValue, "LENGTH")
+	myValue = myPocketPS ->GetAttributeReal("y" + ToString(i))*1000mm
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-6), myValue, "LENGTH")
+	myValue = myPocketPS ->GetAttributeReal("z" + ToString(i))*1000mm
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-5), myValue, "LENGTH")
+	ang1 = myPocketPS ->GetAttributeReal("a" + ToString(i))
+	if ang1 == 0{
+		myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-4), 0 deg, "Angle")
+	}
+	else{
+		myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-4), ang1*1 deg, "Angle")
+	}
+	
+	myPocketPS = `Rzedy Prawa`
+	myValue = myPocketPS ->GetAttributeReal("x" + ToString(i) + "r")*1000mm
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-3), myValue, "LENGTH")
+	myValue = myPocketPS ->GetAttributeReal("y" + ToString(i) + "r")*1000mm
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-2), myValue, "LENGTH")
+	myValue = myPocketPS ->GetAttributeReal("z" + ToString(i) + "r")*1000mm
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-1), myValue, "LENGTH")
+	ang1 = myPocketPS ->GetAttributeReal("a" + ToString(i) + "r")
+	if ang1 == 0 deg{
+		myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i), 0 deg, "Angle")
+	}
+	else{
+		myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i), ang1*1 deg, "Angle")
+	}
+}
+
+i = 1
+for tempReal inside KorektaList { //Kopiowanie KorektaList do List7Copy //Nie idzie przez Copy(), tylko przez petle
+	if(mod(i,4) <> 0){
+		len1 = tempReal
+		myList7Copy->SetAttributeDimension("List7CopyP."+ToString(i), len1, "LENGTH")
+	}
+	else
+	{
+		ang1 = tempReal
+		myList7Copy->SetAttributeDimension("List7CopyP."+ToString(i), ang1, "Angle")
+	}
+	i = i + 1
+}		
+
+listVB = Measure1 .Query("Line", "") //adnotacje wszystkich linii
+for lineVB inside listVB{
+	centerVB = centerofgravity(lineVB)
+	`Relations\VB Scripts.1\VB Script.1` ->Run(ToString((FormatNumber(length(lineVB), "decimal", 4)->ToReal())*1000), point(centerVB->coord(1), centerVB->coord(2), centerVB->coord(3)))
+}
+listVB = Measure.Query("Line", "")
+for lineVB inside listVB{
+	centerVB = centerofgravity(lineVB)
+	`Relations\VB Scripts.1\VB Script.1` ->Run(ToString((FormatNumber(length(lineVB), "decimal", 4)->ToReal())*1000), point(centerVB->coord(1), centerVB->coord(2), centerVB->coord(3)))
+}
+
+AnnotationSet1  -> RepairDeleteInvalidFTAFeatures(32)
+
+doSprawdzenia.RemoveAll()
+System\Empty\Point1234567890.Activity = false
+System\Empty\Point1234567890.Activity = true
+
+//KES_bridge1
+//wywolywany przez KP3, wywoluje create_iter
+
+let o (AdvisorAction)
+let root (VPMReference)
+let count (Integer)
+let b (boolean)
+Let delList, geoList (list)
+Let delItem (Feature)
+Let geoDest, geoItem (Feature)
+
+root = GetEditorRoots("VPMReference").GetItem(1)
+
+count = 0
+for b inside Krok1Show1  {
+	if(b){
+		count = count + 1
+	}
+}
+
+if(Sys\MainKnowlegde3Pattern\PunktyFotelNowe .Size() == count ){
+	Sys\kes\create_iter  -> Run() //trzeba przez reakcje, bo nic wywolane bezposrednio z patternu nie moze usuwac obiektow
+}
+else{
+	Message("Wystapił błąd. Nie udało się stworzyć złożeń adapterów")
+}
+
+
+
+//KES_bridge2
+//Uruchamiany przez KP5, uruchamia kes/move
+
+let o (AdvisorAction)
+let root (VPMReference)
+let p (point)
+let i (integer)
+let list1 (list)
+let su, suIter (Surface)
+
+//usuwa pierwsza polowe PunktyKorekta1
+i = 1
+for i while i <= Sys\MainKnowlegde3Pattern\PunktyFotelNowe .Size(){
+	p = System\PunktyKorekta1 -> Find("Point", "", true)
+	if p <> NULL{
+		p.Delete()
+	}
+}
+
+if moveToDo == true{
+	Sys\kes\move -> Run() //PunktyKorekta1->Query("Point", "")
+}
+
+if(Korekta .Query("Surface", "x.Name == \"FotelS\"").Size() > 0 ){
+	list1 = Korekta .Query("Surface", "x.Name == \"FotelS\"") //usuwanie starego srodkowego fotela
+	su = list1.GetItem(1)
+	su.Delete()
+}
+
+System\Empty\Point1234567890.Activity = false //update
+System\Empty\Point1234567890.Activity = true //update
+
+
+//JK 2020-08-28 Shape_bridge1
+//wylacznie ustawienie parametrow drzewie
+//uruchamiany przez adaper
+
+let root (VPMReference)
+Let myPocketPS (AdvisorParameterSet)
+Let myValue (LENGTH)
+
+if(paramName->Search("r") < 0){ //ustawia parametr z
+	myPocketPS = `Rzedy Lewa` 
+}
+else{
+	myPocketPS = `Rzedy Prawa` 
+}
+
+myValue = myPocketPS -> GetAttributeReal(paramName)*1000mm
+myPocketPS ->SetAttributeReal(paramName, myValue + dzAdap)
+
+paramName = ReplaceSubText(paramName, "z", "y")  //ustawia parametr y
+
+myValue = myPocketPS -> GetAttributeReal(paramName)*1000mm
+myPocketPS ->SetAttributeReal(paramName, myValue + dyAdap)
+
+paramName = ReplaceSubText(paramName, "y", "x")  //ustawia parametr x
+
+myValue = myPocketPS -> GetAttributeReal(paramName)*1000mm
+myPocketPS ->SetAttributeReal(paramName, myValue + dxAdap)
+
+
+
+//JK Shape_bridge2
+//uruchamiany przez adapter //uruchamia KP5
+
+let i,j (Integer)
+let tempReal (Real)
+let len1 (LENGTH)
+let ang1 (ANGLE)
+let lErrors (list)
+let root (VPMReference)
+let myList7Copy (AdvisorParameterSet)
+
+myList7Copy = Sys\Advanced\List7CopyParam
+
+root = GetEditorRoots("VPMReference").GetItem(1)
+
+i = 1
+if KorektaList.Size() == List7 .Size(){
+	j = 1
+	for tempReal inside KorektaList{ //Kopiowanie KorektaList do List7Copy //Nie idzie przez Copy(), tylko przez petle
+		if(mod(i,4) <> 0){
+			len1 = tempReal
+			myList7Copy->SetAttributeDimension("List7CopyP."+ToString(j), len1, "LENGTH")
+		}
+		else
+		{
+			ang1 = tempReal
+			myList7Copy->SetAttributeDimension("List7CopyP."+ToString(j), ang1, "Angle")
+		}
+		j = j + 1
+	}
+	
+}
+else{
+	Message("Blad: ShapeBridge2: KorektaList.Size() <> List7 .Size()")
+}
+
+moveToDo = false
+
+System\Empty\Point1234567890.Activity = false //update
+System\Empty\Point1234567890.Activity = true //update
+Sys\KnowledgePattern5\AgroMeasure .RemoveAll()
+Sys\KnowledgePattern5 .Update()
+
+
+// Jk 2020-02-27 KP5
+// Przesuwa fotele zgodnie z parametrami w drzewie //wywolywany przez Krok 3 lub Shape_bridge2, wywoluje KES_Bridge2
+
+Let x, y, z, dx, dy, dz, xp, yp, zp, myValue (length)
+let da, da_kopia, ang1 (angle)
+Let p0, p, p1, pLewa, pPrawa, point1, point1Copy, pp (Point) // origin zachowania kolejnosci w liscie
+Let u, v, w, lewa (Plane)
+Let list3, list35, list4, PunktyFotelNoweList, PunktyFotelNoweListSort, PunktyFotelNoweListLewa, PunktyFotelNoweListPrawa, list1, list2, PunktyFotelNoweListSortLewa, PunktyFotelNoweListSortPrawa, PunktyFotelNoweListNiewiadomo (List)
+Let d, zmiana, zmiana_a, powrot, wpis, da_plus (Boolean)
+Let i, j, shift, k, jk, ik (Integer)
+Let t, searchStr, currStr, str (String)
+let MeasureX, MeasureZ (line)
+let f, h (wireframe)
+Let myPocketPS (AdvisorParameterSet)
+let open1 (OpenBodyFeature)
+let fotel, surf, suIter (Surface)
+let myKorektaList (AdvisorParameterSet)
+
+myKorektaList = Sys\Advanced\KorektaListParam
+System\Empty\Point1234567890.coord(1)
+
+dx = 0mm //default
+dy = 0mm
+dz = 0mm
+da  = 0 deg
+
+i = 1
+for i while i <= ceil(Sys\Krok1Show1Size /4){ //wpisywanie z drzewa do korekta list
+	myPocketPS = `Rzedy Lewa`
+	myValue = myPocketPS ->GetAttributeReal("x" + ToString(i))*1000mm
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-7), myValue, "LENGTH")
+	myValue = myPocketPS ->GetAttributeReal("y" + ToString(i))*1000mm
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-6), myValue, "LENGTH")
+	myValue = myPocketPS ->GetAttributeReal("z" + ToString(i))*1000mm
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-5), myValue, "LENGTH")
+	ang1 = myPocketPS ->GetAttributeReal("a" + ToString(i))
+	if ang1 == 0{
+		myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-4), 0 deg, "Angle")
+	}
+	else{
+		myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-4), ang1, "Angle")
+	}
+	
+	myPocketPS = `Rzedy Prawa`
+	myValue = myPocketPS ->GetAttributeReal("x" + ToString(i) + "r")*1000mm
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-3), myValue, "LENGTH")
+	myValue = myPocketPS ->GetAttributeReal("y" + ToString(i) + "r")*1000mm
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-2), myValue, "LENGTH")
+	myValue = myPocketPS ->GetAttributeReal("z" + ToString(i) + "r")*1000mm
+	myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i-1), myValue, "LENGTH")
+	ang1 = myPocketPS ->GetAttributeReal("a" + ToString(i) + "r")
+	if ang1 == 0{
+		myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i), 0 deg, "Angle")
+	}
+	else{
+		myKorektaList->SetAttributeDimension("KorektaListP."+ToString(8*i), ang1, "Angle")
+	}
+}
+
+MoveList .RemoveAll()
+KP5Points .RemoveAll()
+
+PunktyFotelNoweList = System\PunktyFotelNowe  -> Query("Point", "") //nastepujace petle segreguja punkty tak, aby byly w kolejnosci od pierwszego do ostaniego. Prawdopodobnie nie jest to optymalny algorytm
+//Notify("1: ", PunktyFotelNoweList)
+
+list1 = PunktyFotelNoweList->Sort("<", "Point", "Real", "y=ReplaceSubText(ReplaceSubText(ReplaceSubText(x.Name , \"Rzad\", \"\"), \" Lewa\", \"\"), \"Prawa\", \"\")->ToReal()") //posortowane rzedami
+
+for pp inside list1{ //wpisywanie w info comment kazdego punktu odleglosci od lewej skrajanej
+	pp.UserInfoComment = DimToString(distance(pp, System\DodatkowePodloga\Lewa), "mm")
+}
+
+i = 1 //ustawianie pojedynczych foteli w rzedzie poprzez sprawdzenie dystansu do lewej skrajnej
+for k while i <= list1.Size(){
+	pp = list1.GetItem(i)
+	currStr = ReplaceSubText(ReplaceSubText(ReplaceSubText(pp.Name , "Rzad", ""), " Lewa", ""), "Prawa", "")
+	str = currStr
+	list2.RemoveAll()
+	for j while str == currStr{
+		list2.Append(pp)
+		i = i + 1
+		if(i <= list1.Size()){
+			pp = list1.GetItem(i)
+			currStr = ReplaceSubText(ReplaceSubText(ReplaceSubText(pp.Name , "Rzad", ""), " Lewa", ""), "Prawa", "")
+		}
+		else{
+			break
+		}
+	}
+	list3 = list2.Sort("<", "Point", "Real", "y = x.UserInfoComment->ToDimension(\"LENGTH\")")
+	list4 = list4 + list3
+}
+
+i = 1
+shift = 0
+for i while i <= Sys\Krok1Show1Size { //fotele maja dzialac bezblednie dla wszystkich kombinacji parametrow, wracac do wartosci wyjsciowych i byc niezalezne od siebie
+	
+	if(Krok1Show1 ->GetItem(i) == true){
+		
+		if(mod(i, 2 ) == 1){
+			zmiana = false
+			zmiana_a = false
+			powrot = false  //niuzywane
+			if(KorektaList ->GetItem((4*i - 3) - 2*(i-1)) <> List7Copy->GetItem((4*i - 3) - 2*(i-1))){ //List7Copy sie zmienia razem z korekta, sluzy do rozpoznawania fotela, ktory uleg przesunieciu
+				dx = abs(KorektaList  ->GetItem((4*i - 3) - 2*(i-1))) - abs(List7->GetItem((4*i - 3) - 2*(i-1))) // List7 sie nie zmienia, sluzy do obliczania przesuniecia w wartosciach bezwzglednych
+				if(dx == 0){ //Powrot do domyslych wartosci - umozliwia ustawienie fotela na miejsce z pierwszego rozstawu
+					dx = 0mm //Brak szans na zachowanie matematycznej dokladnosci - nieaktualne
+					powrot = true
+				}
+				zmiana = true //Umozliwia poprawne przesuniecie - uniezaleznia zmiane jednego parametru od innego
+			}
+			else{
+				dx = abs(KorektaList  ->GetItem((4*i - 3) - 2*(i-1))) - abs(List7->GetItem((4*i - 3) - 2*(i-1)))
+			}
+			if(List7Copy->GetItem((4*i - 2) - 2*(i-1)) <> KorektaList  ->GetItem((4*i - 2) - 2*(i-1))){
+				dy = abs(List7->GetItem((4*i - 2) - 2*(i-1))) - abs(KorektaList  ->GetItem((4*i - 2) - 2*(i-1)))
+				if(dy == 0mm){
+					dy = 0mm
+					powrot = true
+				}
+				zmiana = true
+			}
+			else{
+				dy = abs(List7->GetItem((4*i - 2) - 2*(i-1))) - abs(KorektaList  ->GetItem((4*i - 2) - 2*(i-1)))
+			}
+			if(List7Copy->GetItem((4*i - 1) - 2*(i-1)) <> KorektaList  ->GetItem((4*i - 1) - 2*(i-1))){
+				dz = abs(List7->GetItem((4*i - 1) - 2*(i-1))) - abs(KorektaList  ->GetItem((4*i - 1) - 2*(i-1)))
+				if(dz == 0mm){
+					powrot = true
+				}
+				zmiana = true
+			}
+			else{
+				dz = abs(List7->GetItem((4*i - 1) - 2*(i-1))) - abs(KorektaList  ->GetItem((4*i - 1) - 2*(i-1)))
+			}
+			if(List7Copy->GetItem((4*i) - 2*(i-1)) <> KorektaList  ->GetItem((4*i) - 2*(i-1))){
+				da  = KorektaList  ->GetItem((4*i) - 2*(i-1))
+				da_plus = true
+				if da < 0 {
+					da_plus = false
+				}
+				if(da  == 0 deg){
+					powrot = true
+				}
+				zmiana_a = true
+			}
+			else{
+				da  = 0mm
+			}
+			if(zmiana == true){
+				da  = KorektaList  ->GetItem((4*i) - 2*(i-1))
+			}
+			
+			if(Krok1Angle1 ->GetItem(i) == 0 deg){ //odwrocenie zwrotu w okreslonych sytuacjach
+				dx = -dx
+			}
+			else{
+				da = -da
+			}
+			
+			if( ((Klasyfikacja ->GetItem(i) == OdlegloscOdScianyTyl and isNotSet2->IndexOf(i,1) == 0) or (isNotSet2->IndexOf(i,1) <> 0 and Krok1Angle1 ->GetItem(i) == 0 deg)) and KorektaList  ->GetItem((4*i - 3) - 2*(i-1)) > 0mm ){
+				dx = - dx
+			}
+			dz = -dz
+			if(KorektaList  ->GetItem((4*i - 2) - 2*(i-1)) > 0mm){
+				dy = -dy
+			}
+		}
+		p0 = list4 ->GetItem(i - shift) //punkt przed korekcja
+		xp = p0->coord(1)
+		yp = p0->coord(2)
+		zp = p0->coord(3) //uzywajac translate nie umiem wpisac nowego punktu do listy w drzewie
+		
+		searchStr = "x.Name == " + "\"" + p0.Name + "\""
+		open1 = Korekta->Find("OpenBodyFeature", searchStr, true)
+		
+		if(zmiana == true or zmiana_a == true) {//and powrot == false
+			
+			point1 = CreateOrModifyDatum("Point", System\PunktyKorekta1 , Sys\KnowledgePattern5\PunktyKorekta1 , 0) //punkt po korekcie
+			point1 = point(xp + dx, yp + dy , zp + dz ) //set p = translate(p0, direction(dx, dy, dz), sqrt(dx*dx + dy*dy + dz*dz))
+			point1.Name = p0.Name
+			point1Copy = point1
+			KP5Points .Append(point1)
+			if(mod(i,2) == 1){
+				MoveList.Append(point1)
+				Sys\correction ->Run(open1, i, shift, dx, dy, dz, da, p0.Name, point1) //geometria fotela po korekcji //musi byc w akcji
+				doSprawdzenia.Append(i) //tylko dla tych foteli bedzie wykonywany krok 4
+				if(i > 4){
+					doSprawdzenia.Append(i - 4) //sprawdzenie foteli od ktorych moze mierzyc zmodyfikowany fotel
+				}
+				if(i < Sys\Krok1Show1Size /2 - 3){
+					doSprawdzenia.Append(i + 4)
+				}
+			}			
+		}
+		else{
+			point1 = CreateOrModifyDatum("Point", System\PunktyKorekta1 , Sys\KnowledgePattern5\PunktyKorekta1 , 0)
+			point1 = point(xp + dx, yp + dy, zp  + dz)
+			point1.Name = p0.Name
+			point1Copy = point1
+			KP5Points .Append(point1)
+		}
+	}
+	else{
+		shift = shift + 1
+	}
+}
+
+Fotele .Show = false
+Korekta .Show = true
+
+if(FotelSrodekTylnaLawka >0 ){
+	p = KP5Points .GetItem(KP5Points.Size())
+	searchStr = "x.Name == " + "\"" + p.Name + "\""
+	open1 = Korekta->Find("OpenBodyFeature", searchStr, true)
+	fotel = CreateOrModifyDatum("Surface", open1 , Sys\KnowledgePattern5\Korekta   , 0)
+	fotel.Name = "FotelS"
+	surf=Korekta->Find("Surface", searchStr, true)
+	if(surf.Name.Search("Lewa", 1, true) >= 0){
+		set fotel = translate(surf, direction(0,-1,0), 2*SzerokoscFotela )
+	}
+	if(surf.Name.Search("Prawa", 1, true) >= 0){
+		set fotel = translate(surf, direction(0,1,0), SzerokoscFotela )
+	}		
+}
+
+if(KES_brigdeInt2  == 0){
+	KES_brigdeInt2   = 1
+}
+else{
+	KES_brigdeInt2   = 0
+}
+
+`Relations\Krok 2 - Ustawienie adaptera\List.1`.RemoveAll() //wymuszenie updatu krok 2
+`Relations\Krok 3 - Korekcja pozycji\LockedObjects` .RemoveAll() //wymuszenie updatu krok 3
+
+System\Empty\Point1234567890.Activity = false //update
+System\Empty\Point1234567890.Activity = true //update
+Notify("Przesunięcie foteli wykonane")
+
+
+//measure1 //wywowywane z KP3
+//akcja rysujaca linie pomiarowe
+
+let MeasureX (line)
+let centerX (point) 
+let myList7 (AdvisorParameterSet)
+
+myList7 = Sys\Advanced\List7Param
+
+MeasureX = new("Line", name + "X", Measure1)
+MeasureX = line(StartX, point(StartX ->coord(1) + dir*Odleglosc, StartX ->coord(2), StartX ->coord(3)))
+MeasureX.UserInfoComment = DimToString(Odleglosc, "mm")
+centerX = pointoncurveRatio(MeasureX, StartX, 0.5 , true)
+`Relations\VB Scripts.1\VB Script.1`  ->Run(DimToString(Odleglosc ,"mm") , centerX)
+myList7->SetAttributeDimension("List7P."+ToString(int(ceil((4*i - 3)/2))), Odleglosc, "LENGTH") 
+
+
+/* Action created by jakub.krajanowski 2021-04-14 */
+//measure //wywowywane z KP4
+//akcja rysujaca linie pomiarowe 
+
+let MeasureX (Line)
+
+MeasureX = new("Line", name, open1)
+MeasureX = line(start, end)
+MeasureX.UserInfoComment = DimToString(length(MeasureX), "mm")
+
+
+//JK correction
+//tworzy geometrie korekcji
+// Sys\correction ->Run(open1, i, shift, dx, dy, dz, da, searchStr, p) //wywowywane z KP5
+
+let f, h1, h2 (Surface)
+let searchStr, searchStrR (string)
+let hList (list)
+let p1, p2, pp1, pp2, pp3 (point)
+let li (line)
+let pl (Plane)
+let cur (Curve)
+let kier (Real)
+
+searchStr = "x.Name == " + "\"" + name + "\""
+searchStrR = "x.Name == " + "\"" + name + "R" + "\""
+
+h1 = Fotele->Find("Surface", searchStr, true)
+h2 = Fotele->Find("Surface", searchStrR, true)
+//Notify("da: ", da )
+
+if(Krok1Angle1.GetItem(i) == 0){
+	kier = 1
+}
+else{
+	kier = -1
+}
+
+set p1 = translate(p, direction(kier*1mm, 0mm, 0mm), Sys\Advanced\OdlegloscOsiPochylenieFotela ) //zwiekszenie wartosci powoduje przesuniecie osi obrotu w przod fotela
+set p2 = translate(p1, direction(0mm, 1mm, 0mm), 20mm) //dowolna wartosc <> 0 mm
+
+set pp1 = translate(p, direction(0mm, -1mm, 0mm), 0.05mm)
+set pp2 = translate(pp1, direction(0mm, 0mm, 1mm), 20mm)
+set pp3 = translate(pp1, direction(1mm, 0mm, 0mm), 20mm)
+//li = new("Line", ToString(SzerokoscFotela) , System\Pomocnicze2 )
+li = line(p1, p2)
+pl = plane(pp1, pp2, pp3) // pionowa wzdluzna plaszczyzna do przekrojow
+
+if((dx <> 0mm or dy <> 0mm or dz <> 0mm) and da <> 0deg){ //przesuniecie i obrot
+	
+	if(h1 <> NULL){
+		h1.Show = false  //nieprzesuniety fotel
+		f = new("Surface", name, open1 ) //przesuniety fotel
+		set f = rotate(translate(h1, direction(dx, dy, dz), sqrt(dx*dx + dy*dy + dz*dz)), li, da )
+	}
+	if(h2 <> NULL){ // drugi fotel z pary
+		h2.Show = false
+		f = new("Surface", name + "R", open1)
+		set f = rotate(translate(h2, direction(dx, dy, dz), sqrt(dx*dx + dy*dy + dz*dz)), li, da )
+	}
+}
+else if((dx <> 0mm or dy <> 0mm or dz <> 0mm) and da  == 0deg){ //tylko przesuniecie
+	if(h1 <> NULL){
+		h1.Show = false  //nieprzesuniety fotel
+		f = new("Surface", name, open1 ) //przesuniety fotel
+		set f = translate(h1, direction(dx, dy, dz), sqrt(dx*dx + dy*dy + dz*dz))
+	}
+	if(h2 <> NULL){ // drugi fotel z pary
+		h2.Show = false
+		f = new("Surface", name + "R", open1 )
+		set f = translate(h2, direction(dx, dy, dz), sqrt(dx*dx + dy*dy + dz*dz))
+	}
+}
+else if(dx == 0mm and dy == 0mm and dz == 0mm and da  <> 0deg){ //tylko obrot
+	
+	if(h1 <> NULL){
+		h1.Show = false  //nieprzesuniety fotel
+		f = new("Surface", name, open1 ) //przesuniety fotel
+		set f = rotate(h1, li, da )
+	}
+	if(h2 <> NULL){ //drugi fotel z pary
+		h2.Show = false
+		f = new("Surface", name + "R", open1)
+		set f = rotate(h2, li, da )
+	}
+}
+else{ //przepisanie fotela
+	
+	if(h1 <> NULL){
+		h1.Show = false  //nieprzesuniety fotel
+		f = new("Surface", name, open1 ) //przesuniety fotel
+		set f = h1
+	}
+	if(h2 <> NULL){ // drugi fotel z pary
+		h2.Show = false
+		f = new("Surface", name + "R", open1 )
+		set f = h2
+	}	
+}
+
+
+/* Action created by jakub.krajanowski 2021-02-15 */
+//soft_reset
+
+let p1 (point)
+let li1 (line)
+let su1 (surface)
+let list1 (list)
+let root (VPMReference)
+let act (AdvisorAction)
+let str1 (String)
+let op1 (OpenBodyFeature)
+let c1 (Curve)
+let i(Integer)
+let VPMInst (VPMInstance)
+let VPMRefList (list)
+
+root = GetEditorRoots("VPMReference").GetItem(1)
+Sys\kes\reset.Run()
+
+let coIter (MCX)
+let coList (list)
+coList = root->Query("MCX", "")
+for coIter inside coList{
+	coIter.Delete()
+}
+
+list1 = Fotele .Query("Surface", "")
+for su1 inside list1{
+	su1.Delete()
+}
+
+list1 = Korekta  .Query("Surface", "")
+for su1 inside list1{
+	su1.Delete()
+}
+
+list1 = Measure   .Query("Line", "")
+for li1 inside list1{
+	li1.Delete()
+}
+
+list1 = Measure1    .Query("Line", "")
+for li1 inside list1{
+	li1.Delete()
+}
+
+list1 = System\PunktyFotel     .Query("Point", "")
+for p1 inside list1{
+	p1.Delete()
+}
+
+list1 = System\PunktyFotelNowe      .Query("Point", "")
+for p1 inside list1{
+	p1.Delete()
+}
+
+list1 = Przekroje       .Query("Curve", "")
+for c1 inside list1{
+	c1.Delete()
+}
+
+KP5Points.RemoveAll()
+
+System .Show = false
+Podloga .Show = true
+PodlogiWzory\PodlogaIvecoPrzyklad .Show = false
+op1 = root.Find("OpenBodyFeature", "x.Name == \"Podloga 5\"",  true)
+//op1.Delete()
+op1 = root.Find("OpenBodyFeature", "x.Name == \"PodlogaDev\"",  true)
+//op1 .Delete()
+Sciany  .Show = true
+ScianyWzory\ScianyIvecoPrzyklad .Show = false
+op1 = root.Find("OpenBodyFeature", "x.Name == \"`Sciany 5\"",  true)
+//op1 .Delete()
+op1 = root.Find("OpenBodyFeature", "x.Name == \"ScianyDev\"",  true)
+//op1 .Delete()
+Adapter_x_y_n  .Show = true
+AdapterKopia .Show = false
+Przekroje   .Show = true
+
+Sys\KP3driver .Activity = true
+Sys\KES_brigde1  .Activity = true
+Sys\KES_brigde2  .Activity = true
+
+AnnotationSet1 .RepairDeleteInvalidFTAFeatures(32)
+
+
+
+//JK 2020-06-16 create_iter
+//wywoluje "create" z odpowiednim inputem
+//wywolywany przez KES_bridge1
+//caly folder kes zawiera skrypty pierwotnie utworzone w KES zlozenia nadrzednego
+
+let i, PunktySize, rzad, lminus, numer_bzw (Integer)
+let root (VPMReference)
+let VPMRefList, pfnList, pk1List (list)
+let p, pp (Point)
+let pfn, pk1 (OpenBodyFeature)
+let partf (PartFeature)
+let nieMaZlozen (Boolean)
+let vmpIter, VPMInst (Feature)
+let pname (string)
+Let myPocketPS (AdvisorParameterSet)
+
+root=GetEditorRoots("VPMReference").GetItem(1)
+System\Empty\Point1234567890.coord(1) //update patternu
+
+for vmpIter inside root.Children{
+	if vmpIter.Name->Search("InstancesCopied")>=0{
+		VPMRefList.Append(vmpIter)
+	}
+}
+
+let coIter (MCX)
+let coList (list)
+coList = root->Query("MCX", "")
+for coIter inside coList{
+	coIter.Delete() //usuwanie wiezow jesli istnieja
+}
+
+for VPMInst inside VPMRefList  {
+	VPMInst.Delete() //usuwanie zlozen jesli istnieja
+}
+
+myPocketPS = Sys\kes\AdapUstParam
+i = 1
+for i while i<=ceil(Sys\Krok1Show1Size/2) {
+	
+	myPocketPS->SetAttributeString("String."+ToString(i), "false") //AdapterUstawiony
+}
+
+//pfnList = KP3Points //partf->Find("List", "x.Name == \"KP3Points\"", true)
+//PunktySize = pfnList.Size()
+
+pk1List = System\PunktyKorekta1->Query("Point", "")
+
+i = 1
+for i while i <=  pk1List.Size(){ //uruchmia akcje wstawiajaca i pozycjonujaca puste zlozenia dla kazdego fotela
+	 
+	p = pk1List.GetItem(i) //maszna do zmiany nazwy punktu na bezwzgledny numer siedzenia - obracanie zlozenia tylem
+	pname = p.Name
+	if (pname.Search("Lewa", 1, true) >= 0){
+		lminus = 3
+	}
+	else{
+		lminus = 1
+	}
+	rzad = ReplaceSubText(ReplaceSubText(ReplaceSubText(pname , "Rzad", ""), " Lewa", ""), "Prawa", "")->ToReal() //pozostawienie samej liczby z nazwy ostatniego widocznego punktu
+	numer_bzw = rzad*4 - lminus
+	
+	if(i>1){
+		pp =  pk1List.GetItem(i-1)
+		if(p.Name <> pp.Name){
+			Sys\kes\create  .Run(p, numer_bzw)
+		}
+	}
+	else{
+		Sys\kes\create  .Run(p, numer_bzw)
+	}
+}		
+
+root.Update()
+System\Empty\Point1234567890.Activity = false //update patternow
+System\Empty\Point1234567890.Activity = true
+
+
+
+///* Action created by jakub.krajanowski 2020-06-10 */ create
+//tworzy zlozenia pod adaptery
+//wywolywane przez create_iter
+
+let currentClass(String)
+let AssemblyPoint (Point)
+let pathOfAssembly, pathOfSeat, searchStr (String)
+let newShape (`3DShape`)
+let name, pfname (String)
+let BodyPart (BodyFeature)
+let lErrors (list)
+let vpmref, root (VPMReference)
+let vpminst (VPMInstance)
+let pf (Point)
+
+root=GetEditorRoots("VPMReference").GetItem(1)
+name = seatPoint.Name
+pf = System\PunktyFotel ->Find("Point","x.Name ->Search( \"Point\") >= 0",true) //losowy punkt do tworzenia unikalnej nazwy zlozen
+pfname = ReplaceSubText(pf.Name, "Point", "")
+
+vpmref = new("VPMReference",name + "-" + root.name + pfname,NULL) //tworzy zlozenie
+vpminst = new("VPMInstance","InstancesCopied" + name, root, vpmref) //tworzy instancje
+
+newShape = new("3DShape", name, vpmref) ////tworzy shape i punkt w instancji
+BodyPart = newShape->Find("BodyFeature", "", true)
+AssemblyPoint = new("Point", name, BodyPart)
+searchStr = "x.Name == " + "\"" + name + "R" + "\""	
+if(Krok1Position1.GetItem(numer_bzw) == false){ //true - solaris, false - iveco
+	if Korekta.Find("Surface", searchStr, true) <> NULL and seatPoint.coord(2) > 0mm{
+		AssemblyPoint = point(0mm, SzerokoscFotela, 0mm)
+	}
+	else{
+		AssemblyPoint = point(0mm, 0mm , 0mm)
+	}
+}
+else{
+	AssemblyPoint = point(0mm, SzerokoscFotela/2 , 0mm)
+}
+AssemblyPoint.Show = false
+
+pathOfSeat = root ->CreatePathString(NULL, seatPoint) //tworzy wiazanie
+pathOfAssembly = root ->CreatePathString(NULL, AssemblyPoint)
+root ->CreateConstraint("CoincidencePoint" ,"Coincidence", pathOfSeat, pathOfAssembly)
+root.Update()
+
+let coIter (MCX) //usuwa wizanie
+let coList (list)
+coList = root->Query("MCX", "")
+for coIter inside coList{
+	coIter.Delete()
+}
+
+if (Krok1Angle1.GetItem(numer_bzw) <> 0){
+	Sys\kes\rotate_asm.Run(vpminst)
+}
+
+
+///* Action created by jakub.krajanowski 2020-06-29 */ adapter
+//ustawienie adaptera
+//uruchamiany przez Krok2, uruchamia Shape_brigde2 i Shape_brigde1
+
+let zAdap1, dzAdap, zAdap2, xAdap1, xAdap2, dxAdap, dyAdap, yAdap1, yAdap2 (LENGTH)
+let root (VPMReference)
+let vpminst, vpmIter, adapInst (VPMInstance)
+let AdapterPlaneList, ScianyAdapterPowierzchnieListN, ScianyAdapterPowierzchnieListXY, coList, ScianyAdapterPowierzchnieListZ, Adaptery, vpmInstList (List)
+let surfIter, scianaAdapterN, scianaAdapterXY, scianaAdapterZ, scianaAdapterZs, scianaAdapterXYs (Surface)
+let GeoFutureIter, scianaAdapterXYplane, autoZlozXY, autoZlozYZ, autoZlozZX (Plane)
+let i, j, obrN, mn, b, c, lminus, numer_bzw, rzad (integer)
+let path1, path2, paramName, pname, str (string)
+let coIter (MCX)
+let mt (matrix)
+let curv1, curv2 (Curve)
+let instAdapter, punktn, punktz, punktxy (DatabaseObjectType)
+let shape (`3DShape`)
+let lErrors (list)
+Let myPocketPS (AdvisorParameterSet)
+
+root=GetEditorRoots("VPMReference").GetItem(1) //Przygotowanie zmiennych
+SetWorkingContext(System\AdaperTemp  )
+
+for instAdapter inside root.Children{
+	if instAdapter.Name->Search("InstancesCopied")>=0{
+		Adaptery.Append(instAdapter)
+	}
+}
+
+myPocketPS = Sys\kes\AdapUstParam
+
+i = 1
+for vpminst inside Adaptery{ //Parallelism
+	
+	if(vpminst->Find("3Dshape", "x.Name ->Search( \"Rzad\") == -1", true) <> NULL){ //sprawdza czy w zlozeniu automatycznym jest jakikolwiek adapter
+		
+		pname = vpminst.Name
+		if (pname.Search("Lewa", 1, true) >= 0){
+			lminus = 3
+		}
+		else{
+			lminus = 1
+		}
+		rzad = ReplaceSubText(ReplaceSubText(ReplaceSubText(pname , "InstancesCopiedRzad", ""), " Lewa", ""), "Prawa", "")->ToReal() //pozostawienie samej liczby z nazwy ostatniego widocznego punktu
+		numer_bzw = rzad*4 - lminus
+		
+		if(Krok1Angle1   -> GetItem(numer_bzw) == 0 ){ //okreslenie strony, w ktora zwrocony jest dany fotel //kopia z KP4
+			if (Klasyfikacja ->GetItem(numer_bzw) == OdlegloscOdScianyTyl and isNotSet2->IndexOf(numer_bzw,1) == 0) or (isNotSet2->IndexOf(numer_bzw,1) <> 0 and Klasyfikacja ->GetItem(numer_bzw) == OdlegloscOdPoprzedzajacego) { //okreslenie strony, w ktora mierzy dany fotel
+				b = 1 //w tyl
+			}
+			else{
+				b = -1 //w przod
+			}
+		}
+		else{
+			if ( Klasyfikacja ->GetItem(numer_bzw) == OdlegloscOdScianyTyl and isNotSet2->IndexOf(numer_bzw,1) == 0) { //and isNotSet2->IndexOf(i,1) == 0) or (isNotSet2->IndexOf(i, 1) <> 0 and (Klasyfikacja ->GetItem(i) == OdlegloscOdPoprzedzajacego or Klasyfikacja ->GetItem(i) == OdlegloscSkierowanychDoSiebie)
+				b = -1 //w przod			
+			}
+			else{
+				b = 1 //w tyl
+			}
+		}
+		
+		vpmInstList = vpminst.Query("VPMInstance", "")
+		for vpmIter inside vpmInstList{
+			punktn = vpmIter.Access("punkt_n", "DatabaseObjectType")
+			punktxy = vpmIter.Access("punkt_x_y", "DatabaseObjectType")
+			punktz = vpmIter.Access("punkt_z", "DatabaseObjectType")
+			adapInst = vpmIter
+			if(punktn <> adapInst.Reference or punktxy <> adapInst.Reference or punktz <> adapInst.Reference){
+				break
+			}
+		}
+		
+		if(adapInst.Name <>  myPocketPS ->GetAttributeString("String." + ToString(i))){ //AdapterUstawiony
+			
+			dxAdap = 0mm //dystans przesuniecia fotela
+			dzAdap = 0mm
+			obrN = 1 //kierunek przesuniecia fotela
+			
+			scianaAdapterN = ScianyAdapterPowierzchnieListN ->GetItem(i) //scianaAdapterN
+			scianaAdapterXY = ScianyAdapterPowierzchnieListXY ->GetItem(i) //scianaAdapterXY
+			scianaAdapterZ = ScianyAdapterPowierzchnieListZ  ->GetItem(i) //scianaAdapterZ
+			
+			paramName = "z" + ReplaceSubText(ReplaceSubText(ReplaceSubText(vpminst.Name, "InstancesCopiedRzad", "")," Lewa",""), "Prawa", "") //"z" + numer fotela daje nazwe parametru w drzewie
+			if( vpminst->Find("Point", "x.Name ->Search(\"Prawa\") >= 0" , true) <> NULL){
+				paramName = paramName + "r" //dodaje "r" gdy prawa	
+			}
+			
+			coList = root->Query("MCX", "") //usuniecie wiezow
+			for coIter inside coList{
+				coIter.Delete()
+			}
+			
+			shape = vpminst->Find("3DShape","x.Name ->Search( \"Rzad\") >= 0",true)
+			autoZlozXY = shape -> Find("Plane", "x.Name == \"xy plane\"", true)
+			autoZlozYZ = shape -> Find("Plane", "x.Name == \"yz plane\"", true)
+			autoZlozZX = shape -> Find("Plane", "x.Name == \"zx plane\"", true)
+			path1 = root ->CreatePathString(NULL, xy_plane )
+			path2 = root ->CreatePathString(vpminst, autoZlozXY)
+			root ->CreateConstraint("Parallelism1" ,"Parallelism", path1, path2)
+			path1 = root ->CreatePathString(NULL, yz_plane)
+			path2 = root ->CreatePathString(vpminst, autoZlozYZ)
+			root ->CreateConstraint("Parallelism2" ,"Parallelism", path1, path2)
+			path1 = root ->CreatePathString(NULL, zx_plane)
+			path2 = root ->CreatePathString(vpminst, autoZlozZX)
+			root ->CreateConstraint("Parallelism3" ,"Parallelism", path1, path2)
+			
+			mt=vpminst.PositionMatrix //1 pomiar pozycji adaptera
+			zAdap1 = (mt->Get(3,4))*1mm
+			yAdap1 = (mt->Get(2,4))*1mm
+			xAdap1 = (mt->Get(1,4))*1mm
+			
+			if(punktn <> adapInst.Reference){
+				if punktxy <> adapInst.Reference{
+					if(scianaAdapterN.Name <> "empty"){
+						
+						path1 = root ->CreatePathString(NULL, zx_plane)
+						path2 = root ->CreatePathString(vpminst, autoZlozZX)
+						root ->CreateConstraint("Distance" ,"Distance", path1, path2)
+						
+						path1 = root ->CreatePathString(vpminst, adapInst)
+						path1 = path1 + "\\" + "punkt_n" //jedyna znaleziona opcja zwiazania vertexow (CATVertex)
+						path2 =  root ->CreatePathString(NULL, scianaAdapterN)
+						root ->CreateConstraint("CoincidenceN1" ,"Coincidence", path1, path2)
+						
+						path1 = root ->CreatePathString(vpminst, adapInst)
+						path1 = path1 + "\\" + "punkt_x_y"
+						path2 =  root ->CreatePathString(NULL, scianaAdapterN)
+						root ->CreateConstraint("CoincidenceN2" ,"Coincidence", path1, path2)
+						DisableErrors(TRUE,TRUE,TRUE)	
+						root.Update()
+						lErrors = EnableErrors()
+						if lErrors.Size() > 0 {
+							Message("Blad przebudowy zlozenia")
+						}
+						myPocketPS->SetAttributeString("String."+ToString(i), adapInst.Name) //AdapterUstawiony
+					}
+					else{
+						Notify(" ", vpminst.Name, ": brak powierzchni adaptera N")
+					}
+				}
+				else{
+					Notify(" ", vpminst.Name, ": brak punkt_x_y")	
+				}
+			}
+			else if punktxy <> adapInst.Reference{
+				if(scianaAdapterXY.Name <> "empty"){				
+					
+					scianaAdapterXYs = new("Surface", "scianaAdapterXYs", System\AdaperTemp )
+					scianaAdapterXYs = planetangent(scianaAdapterXY, pointonsurface(scianaAdapterXY, point(0mm,0mm,0mm), direction(1mm,0mm,0mm), 0mm))
+					path1 = root ->CreatePathString(vpminst, adapInst)
+					path1 = path1 + "\\" + "punkt_x_y"
+					path2 =  root ->CreatePathString(NULL, scianaAdapterXYs)
+					root ->CreateConstraint("CoincidenceXY" ,"Coincidence", path1, path2)
+					vpminst.Update()
+					myPocketPS->SetAttributeString("String."+ToString(i), adapInst.Name) //AdapterUstawiony
+				}
+				else{
+					Notify(" ", vpminst.Name, ": brak powierzchni adaptera XY")
+				}
+			}	
+			
+			if punktz <> adapInst.Reference{
+				if(scianaAdapterZ.Name <> "empty"){
+					
+					scianaAdapterZs = new("Surface", "scianaAdapterZs", System\AdaperTemp)
+					if(scianaAdapterXY.Name <> "empty"){
+						scianaAdapterXYplane = planetangent(scianaAdapterXY, point(0mm,0mm,0mm))
+						if(angle(planetangent(scianaAdapterXY, point(0mm,0mm,0mm)), planetangent(scianaAdapterZ , point(0mm,0mm,0mm))) < 1 deg){ //jesli powierzchnie sa w jednej przeszczyznie
+							scianaAdapterZs = planeangle(scianaAdapterXYplane, line(pointonsurface(scianaAdapterZ,point(-20000mm,0mm,0mm),direction(1mm,0mm,0mm),0mm), pointonsurface(scianaAdapterZ,point(20000mm,0mm,0mm),direction(1mm,0mm,0mm),0mm)), 90 deg, true) //zmiana na pozioma
+							Notify("obrocono powierzchnie XY o 90st")
+						}
+						else{
+							scianaAdapterZs = planetangent(scianaAdapterZ, pointonsurface(scianaAdapterZ, point(0mm,0mm,0mm), direction(1mm,0mm,0mm), 0mm))
+						}
+					}
+					else{
+						scianaAdapterZs = planetangent(scianaAdapterZ, pointonsurface(scianaAdapterZ, point(0mm,0mm,0mm), direction(1mm,0mm,0mm), 0mm))
+					}
+					
+					path1 = root ->CreatePathString(vpminst, adapInst)
+					path1 = path1 + "\\" + "punkt_z"
+					path2 =  root ->CreatePathString(NULL, scianaAdapterZs)
+					root ->CreateConstraint("CoincidenceZ" ,"Coincidence", path1, path2)
+					vpminst.Update()
+					myPocketPS->SetAttributeString("String."+ToString(i), adapInst.Name) //AdapterUstawiony	
+				}
+				else{
+					Notify(" ", vpminst.Name, ": brak powierzchni adaptera Z")
+				}
+			}
+			
+			mt=vpminst.PositionMatrix //2 pomiar polozenia adaptera
+			zAdap2 = (mt->Get(3,4))*1mm
+			yAdap2 = (mt->Get(2,4))*1mm
+			xAdap2 = (mt->Get(1,4))*1mm
+			dzAdap = zAdap2 - zAdap1
+			dyAdap = yAdap2 - yAdap1
+			//dxAdap = xAdap2 - xAdap1
+			if(xAdap1 > 0){ //dodatnie - przednie nadkole //zakladam, ze obie wartosci sa zawsze po tej samej stronie zera
+				if xAdap1 > xAdap2{
+					dxAdap = xAdap1 - xAdap2
+					c = -1 //wspolczynnik
+					//Notify("#: tutaj 1: #: #: # ", vpminst.Name, dxAdap, b, c)
+				}
+				else{
+					dxAdap = xAdap2 - xAdap1
+					c = 1
+					//Notify("#: tutaj 2: #: #: # ", vpminst.Name, dxAdap, b, c)
+				}
+			}
+			else{ //ujemne - tylne nadkole
+				if xAdap1 < xAdap2{
+					dxAdap = xAdap2 - xAdap1
+					c = 1
+					//Notify("#: tutaj 3: #: #: # ", vpminst.Name, dxAdap, b, c)
+				}
+				else{
+					dxAdap = xAdap1 - xAdap2
+					c = -1
+					//Notify("#: tutaj 4: #: #: # ", vpminst.Name, dxAdap, b, c)
+				}
+			}
+			Sys\Shape_bridge1->Run(paramName, b*c*dxAdap, dyAdap, dzAdap)
+		}
+	}
+	i = i + 1	
+	
+	coList = root->Query("MCX", "") //usuniecie wiezow
+	for coIter inside coList{
+		coIter.Delete()
+	}
+	if(scianaAdapterZs <> NULL){
+		scianaAdapterZs.Delete()
+	}
+	if(scianaAdapterXYs <> NULL){
+		scianaAdapterXYs.Delete()
+	}
+}
+
+Sys\Shape_bridge2.Run() //root->Find("AdvisorAction", "x.Name == \"Shape_bridge2\"", true) //uruchomienie KP5 i ewentualnie move w zaleznosci ktory krok uruchamial sekwencje
+
+///* Action created by jakub.krajanowski 2020-06-17 */ //move
+//przesuwa zlozenia adapterow zgodnie z ruchami fotela //uruchamiany z KES_Bridge2
+
+let i, numer_bzw, rzad, lminus (Integer)
+let p, newPoint (point)
+let AssemblyXY, AssemblyZX, AssemblyYZ, newPlaneXY, newPlaneZX, newPlaneYZ  (Plane)
+let pathOfAssembly, pathOfSeat, pName, x_str,y_str,z_str, searchStr, szer_str (String)
+let vpminstCurrent, vpminst (VPMInstance)
+let root (VPMReference)
+let shape(`3DShape`)
+let mList, vpminstList, list1 (list)
+let BodyPart (BodyFeature)
+let saZlozenia (Boolean)
+let vmpIter (VPMInstance)
+let createdCoincidence (MRXCoincidence)
+let x, y, z (LENGTH)
+let mt (Matrix)
+let x_int,y_int,z_int, szer_int  (Real)
+
+root=GetEditorRoots("VPMReference").GetItem(1)
+
+saZlozenia = false
+list1 = root.Children.Filter("VPMInstance","")
+for vmpIter inside list1{
+	if vmpIter.Name->Search("InstancesCopied")>=0{
+		saZlozenia = true
+		set vpminst = vmpIter
+		vpminstList.Append(vpminst)
+	}
+}
+
+if(saZlozenia){ //jesli sa utworzne zlozenia
+	
+	//vpminstList = root->Query("VPMInstance","x.Name->Search(\"InstancesCopied\")>=0 ")
+	for p inside MoveList{ //MoveList wypelnia KP5
+		
+		pName = p.Name
+		if (pName.Search("Lewa", 1, true) >= 0){
+			lminus = 3
+		}
+		else{
+			lminus = 1
+		}
+		rzad = ReplaceSubText(ReplaceSubText(ReplaceSubText(pName , "Rzad", ""), " Lewa", ""), "Prawa", "")->ToReal() //pozostawienie samej liczby z nazwy ostatniego widocznego punktu
+		numer_bzw = rzad*4 - lminus
+		
+		for vpminst inside vpminstList{ //znajduje instancje po nazwie
+			if(vpminst.Name ->Search(pName)>=0){
+				vpminstCurrent = vpminst
+				break
+			}
+		}
+		
+		x = p.coord(1)
+		y = p.coord(2)
+		z = p.coord(3)
+		
+		x_str = DimToString(x, "mm")
+		y_str = DimToString(y, "mm")
+		z_str = DimToString(z, "mm")
+		szer_str = DimToString(SzerokoscFotela, "mm")
+		
+		x_int = ReplaceSubText(x_str, "mm", "").ToReal()
+		y_int = ReplaceSubText(y_str, "mm", "").ToReal()
+		z_int = ReplaceSubText(z_str, "mm", "").ToReal()
+		szer_int = ReplaceSubText(szer_str, "mm", "").ToReal()		
+		
+		mt=vpminstCurrent.PositionMatrix //zmiana z wiezow na macierze ze wzgledu na czeste bledy przebudowy przesuwanego adaptera
+		//Notify("mt: #; #; #", mt->Get(3,4), mt->Get(2,4), mt->Get(1,4))
+		
+		searchStr = "x.Name == " + "\"" + pName + "R" + "\""		
+		if Korekta.Find("Surface", searchStr, true) <> NULL and p.coord(2) > 0mm {
+			mt->Set(1, 4, x_int)
+			if(Krok1Position1.GetItem(numer_bzw) == true){
+				mt->Set(2, 4, y_int - szer_int/2) //punkt jest na srodku lewego siedzenia
+			}
+			else{
+				mt->Set(2, 4, y_int - szer_int)
+			}
+			mt->Set(3, 4, z_int)
+		}
+		else{
+			mt->Set(1,4,x_int)
+			if(Krok1Position1.GetItem(numer_bzw) == true){
+				mt->Set(2, 4, y_int - szer_int/2) //punkt jest na srodku lewego siedzenia
+			}
+			else{
+				mt->Set(2, 4, y_int)
+			}
+			mt->Set(3,4,z_int)
+			Notify("#, #", pName, Krok1Position1.GetItem(numer_bzw) == true)
+		}
+		
+		vpminstCurrent.PositionMatrix = mt
+		//Notify("mt: #; #; #", mt->Get(3,4), mt->Get(2,4), mt->Get(1,4))
+		
+		//		shape=vpminstCurrent->Find("3DShape","x.Name -> Search(\"Rzad\")>=0", true) //znajduje shape i punkt zlozenia
+		//		newPoint=shape->Find("Point","x.Name -> Search(\"Rzad\")>=0", true)
+		//		
+		//		AssemblyXY = shape -> Find("Plane", "x.Name->Search(\"xy\") >= 0", true)
+		//		AssemblyZX = shape -> Find("Plane", "x.Name->Search(\"zx\") >= 0", true)
+		//		AssemblyYZ = shape -> Find("Plane", "x.Name->Search(\"yz\") >= 0", true)
+		//		
+		//		BodyPart = shape->Find("BodyFeature", "", true)
+		//		if(BodyPart -> Find("Plane", "x.Name == \"PlaneXY\"", true) <> NULL){
+		//			BodyPart -> Find("Plane", "x.Name == \"PlaneXY\"", true).Delete()
+		//		}
+		//		newPlaneXY = new("Plane", "PlaneXY", BodyPart)
+		//		newPlaneXY = planeoffset(AssemblyXY, newPoint)
+		//		newPlaneXY.Show = false
+		//		
+		//		if(BodyPart -> Find("Plane", "x.Name == \"PlaneZX\"", true) <> NULL){
+		//			BodyPart -> Find("Plane", "x.Name == \"PlaneZX\"", true).Delete()
+		//		}
+		//		newPlaneZX = new("Plane", "PlaneZX", BodyPart)
+		//		newPlaneZX = planeoffset(AssemblyZX, newPoint)
+		//		newPlaneZX.Show = false
+		//		
+		//		if(BodyPart -> Find("Plane", "x.Name == \"PlaneYZ\"", true) <> NULL){
+		//			BodyPart -> Find("Plane", "x.Name == \"PlaneYZ\"", true).Delete()
+		//		}
+		//		newPlaneYZ = new("Plane", "PlaneYZ", BodyPart)
+		//		newPlaneYZ = planeoffset(AssemblyYZ, newPoint)
+		//		newPlaneYZ.Show = false
+		//		
+		//		pathOfSeat = root ->CreatePathString(NULL, p) //przesuwa w Z
+		//		pathOfAssembly =  root ->CreatePathString(NULL, newPlaneXY)
+		//		root ->CreateConstraint("CoincidencePointZ" ,"Coincidence", pathOfSeat, pathOfAssembly)
+		//		
+		//		pathOfSeat = root ->CreatePathString(NULL, p) //przesuwa w Y
+		//		pathOfAssembly =  root ->CreatePathString(NULL, newPlaneZX)
+		//		root ->CreateConstraint("CoincidencePointY" ,"Coincidence", pathOfSeat, pathOfAssembly)
+		//		
+		//		pathOfSeat = root ->CreatePathString(NULL, p) //przesuwa w X
+		//		pathOfAssembly =  root ->CreatePathString(NULL, newPlaneYZ)
+		//		root ->CreateConstraint("CoincidencePointX" ,"Coincidence", pathOfSeat, pathOfAssembly)
+		//		
+		//		root.Update()
+	}
+}
+else{
+	Notify("Brak zlozen do przesuniecia")
+}
+
+let coIter (MCX) //usuniecie wizania
+let coList (list)
+coList = root->Query("MCX", "")
+for coIter inside coList{
+	coIter.Delete()
+}
+
+
+//JK 2020-06-29 rotate
+//obrocenie instancji o 180 stopni wzgledem osi pionowej //stworzenie rotate jesli nie ma
+
+let root (VPMReference)
+let rotateAsm1 (VPMInstance)
+let coList (List)
+let surfIter, scianaAdapter, SurfaceA, Lewa, KraniecAdaptera (Surface)
+let xzAdapter, xyAdapter, xyAsm, yzAdapter, yzAsm, zxAdapter, zxAsm (Plane)
+let shape (`3DShape`)
+let name, path1, path2 (string)
+let coIter (MCX)
+let co (MRXCoincidence)
+let shapeRot(`3DShape`)
+let vpmref (VPMReference)
+
+root = GetEditorRoots("VPMReference")->GetItem(1)
+
+shape = vpminst->Find("3DShape","x.Name ->Search( \"Rzad\") >= 0",true)
+xyAdapter = shape -> Find("Plane", "x.Name == \"xy plane\"", true)
+yzAdapter = shape -> Find("Plane", "x.Name == \"yz plane\"", true)
+zxAdapter = shape -> Find("Plane", "x.Name == \"zx plane\"", true)
+
+if(root->Find("VPMInstance", "x.Name == \"rotateAsm\"", true) <> NULL){
+	rotateAsm1 = root->Find("VPMInstance", "x.Name == \"rotateAsm\"", true)
+	rotateAsm1.Delete()	
+}
+	
+vpmref = new("VPMReference","rotate",NULL) //tworzy zlozenie
+rotateAsm1 = new("VPMInstance","rotateAsm", root, vpmref)
+shapeRot = new("3DShape", "rotateShape", vpmref) //tworzy shape
+
+xyAsm = rotateAsm1 -> Find("Plane", "x.Name == \"xy plane\"", true)
+yzAsm = rotateAsm1 -> Find("Plane", "x.Name == \"yz plane\"", true)
+zxAsm = rotateAsm1 -> Find("Plane", "x.Name == \"zx plane\"", true)
+
+path1 = root ->CreatePathString(NULL,  zxAsm)
+path2 =  root ->CreatePathString(vpminst, zxAdapter )
+root ->CreateConstraint("Coincidence1" ,"Coincidence", path1, path2)
+
+root.Update()
+coList.RemoveAll() //usuniecie wiazan
+coList = root->Query("MCX", "")
+for coIter inside coList{
+	coIter.Delete()
+}
+
+path1 = root ->CreatePathString(NULL, yzAsm)
+path2 = root ->CreatePathString(vpminst, yzAdapter)
+root ->CreateConstraint("Coincidence2", "Coincidence", path1, path2)
+
+path1 = root ->CreatePathString(NULL, xyAsm )
+path2 =  root ->CreatePathString(vpminst, xyAdapter )
+root ->CreateConstraint("Coincidence3" ,"Coincidence", path1, path2)
+
+root.Update()
+coList.RemoveAll() //usuniecie wiazan
+coList = root->Query("MCX", "")
+for coIter inside coList{
+	coIter.Delete()
+}
+
+path1 = root ->CreatePathString(vpminst, yzAdapter) //ustabilizowanie na czas obrotu
+path2 =  root ->CreatePathString(NULL, yzAsm )
+root ->CreateConstraint("Coincidence2" ,"Coincidence", path1, path2)
+
+path1 = root ->CreatePathString(vpminst, xyAdapter )
+path2 =  root ->CreatePathString(NULL, xyAsm )
+root ->CreateConstraint("Coincidence3" ,"Coincidence", path1, path2)
+
+co = root->Find("MRXCoincidence", "" , true) //obrot
+co.OptionOrientation1 = "CATMRXOption_Orientation_opposite"
+
+root.Update()
+
+coList.RemoveAll() //usuniecie wiazan
+coList = root->Query("MCX", "")
+for coIter inside coList{
+	coIter.Delete()
+}
+
+rotateAsm1.Delete()
+
+
+///* Action created by jakub.krajanowski 2020-05-06 */ reset
+//usuwa zlozenia pod adaptery
+
+let i(Integer)
+let root (VPMReference)
+let VPMInst (VPMInstance)
+let VPMRefList (list)
+let o (AdvisorAction)
+
+root=GetEditorRoots("VPMReference").GetItem(1)
+
+VPMRefList = root -> Query("VPMInstance", "x.Name->Search(\"InstancesCopied\")>=0")
+
+let coIter (MCX)
+let coList (list)
+coList = root->Query("MCX", "")
+for coIter inside coList{
+	coIter.Delete()
+}
+
+for VPMInst inside VPMRefList{
+	VPMInst.Delete()
+}
+
+
+
+// JK 2020-01-30 Krok 0 - Pozycje
+// Uproszczony KP1. Pomaga wybierac powierzchnie podlogi i scian. Wskazuje ilosc powierzchni w FoteleBaza i sprawdza zgodnosc z tabela. Jest opcjonalny
+
+Let x, y, z (Real) //KP1
+Let p (Point)
+Let d (Boolean)
+Let i, j, iloscKolumn, iloscWierszy (Integer)
+Let t, name, surname, strIter, strPianki, strAkc (String)
+Let sh (DTSheetType)
+let dt (DesignTableType)
+let root (VPMReference)
+let configcl, naglowki (list)
+let sha, myShape (Feature)
+let iloscAkcesoriow (integer)
+Let myPocketShow, myPocketAngle, myPocketType  (AdvisorParameterSet)
+
+root = GetEditorRoots("VPMReference").GetItem(1)
+myPocketType = Sys\Advanced\Krok1Type1Param
+System\Empty\Point1234567890.coord(1) //sztuczny input patternu
+
+myShape = System.Owner //Owner dowolnego geosetu bezposrednio pod shapem jest tym shapem
+sha = GetRootUI() //aktywny obiekt
+if(sha.Name ==myShape.Name){ //shape musi byc aktywny ze wzgledu na adnotacje //TODO: sprawdzic czy dziala przyrownanie bez .Name
+	dt = sha -> Find("DesignTableType", "",true)
+	if(dt <> NULL){
+		
+		if(dt-> Query("DTSheetType", "").Size() == 1){ 
+			
+			sh = dt-> Find("DTSheetType", "",true)
+			
+			iloscKolumn = 1
+			t =sh  -> CellAsString(0, 1) // sprawdza czy koniec tablicy
+			for iloscKolumn while t<>""{
+				naglowki.Append(t)
+				t = sh  -> CellAsString(0, iloscKolumn + 1)
+			}
+			iloscKolumn = iloscKolumn - 1 //po petli wartosc zostaje o 1 wyzsza niz w rzeczywistosci
+			
+			iloscAkcesoriow = iloscKolumn - 11 //11 pierszych kolumn to kolumny obligatoryjne
+			if iloscKolumn < 11 {
+				Message("Zbyt mała ilość kolumn w design table")
+				exit	
+			}
+			
+			iloscWierszy = 1
+			t =sh  -> CellAsString(1,1) // sprawdza czy koniec tablicy
+			for iloscWierszy while t <> "" {
+				
+				name = "Rzad" + ceil(iloscWierszy/4) //nazewnictwo
+				if(mod(iloscWierszy,4) == 1 or mod(iloscWierszy,4) == 2){
+					surname = " Lewa"
+				}
+				else{
+					surname = "Prawa"
+				}
+				
+				x = sh  -> CellAsReal(iloscWierszy,1) //sczytuje wspolrzedne i wlasciwosci
+				y = sh  -> CellAsReal(iloscWierszy,2)
+				z = sh  -> CellAsReal(iloscWierszy,3)
+				d = sh  -> CellAsBoolean(iloscWierszy,4)
+				
+				configcl.Append(sh -> CellAsString(iloscWierszy,11))
+				
+				if(d == true){ //wstawia punkty z tabeli
+					p = point(x/1000, y/1000, z/1000)//wspolrzedne  w metrach
+					`Relations\VB Scripts.1\VB Script.1` ->Run(name, p) //adnotacja z numerem rzedu
+				}
+				t = sh  -> CellAsString(iloscWierszy+1, 1)
+			}
+			configcl.RemoveDuplicates()
+			strPianki = ""
+			for strIter inside configcl{
+				strPianki = strPianki + strIter
+				strPianki = strPianki + "; "
+			}
+			
+			i = 12
+			strAkc = ""
+			for i while i <= naglowki.Size(){
+				strAkc = strAkc + naglowki.GetItem(i)
+				strAkc = strAkc + "; "
+			}
+			
+			Notify("Pianki: ", strPianki)
+			Notify("Akcesoria: ", strAkc)
+			Notify("Ilość pianek: ", configcl.Size())
+			Notify("Ilość akcesoriów: ", iloscAkcesoriow)
+			Notify("Ilość powierzchni potrzebnych w geosecie FoteleBaza: ", configcl.Size() + iloscAkcesoriow)
+			Notify("Obecna ilość powiechni w geosecie FoteleBaza: ", FoteleBaza.Query("Surface", "").Size())
+			
+			Pianki = strPianki
+			Akcesoria = strAkc
+		}
+		else if(dt-> Query("DTSheetType", "").Size() == 0){
+			Message("W DesignTable nie ma żadnego arkusza")
+		}
+		else{
+			Message("W DesignTable jest więcej niż jeden arkusz")
+		}
+	}
+	else{
+		Message("W shapie nie ma żadnego DesingTable")
+	}
+}
+else{
+	Message("Proszę aktywować shape")
+}
+
+AnnotationSet1->RepairDeleteInvalidFTAFeatures(32)
+System\Empty\Point1234567890.Activity = false //update
+System\Empty\Point1234567890.Activity = true //update
+
+
+
+//Krok 1 - Rozstaw foteli
+//Uruchamia KP1driver i rozpoczyna rozstaw foteli
+
+System\Empty\Point1234567890.coord(1) //odwolanie sie do okreslonego sztucznego obiektu pomaga wymuszac update patternu
+
+if(Sys\Advanced\IntegerKP1   == 1){ //Uruchamia KP1driver
+	Sys\Advanced\IntegerKP1   = 0
+}
+else{
+	Sys\Advanced\IntegerKP1   = 1
+}
+
+System\Empty\Point1234567890.Activity = false //update
+System\Empty\Point1234567890.Activity = true //update
+
+
+//Krok 2 - Ustawienie adaptera wywolany z patternu, bo jest spojnie z innymi krokami
+//Wywoluje adapter_driver
+
+let tempList, lErrors (list)
+let real1 (real)
+let i (integer)
+Let myPocketPS (AdvisorParameterSet)
+let open1 (OpenBodyFeature)
+let myValue (LENGTH)
+let root (VPMReference)
+
+System\Empty\Point1234567890.coord(1) //update patternu
+
+if(Integer.1 == 0){
+	Integer.1 = 1
+}
+else{
+	Integer.1 = 0
+}
+
+System\Empty\Point1234567890.Activity = false //update
+System\Empty\Point1234567890.Activity = true //update
+
+
+//JK 2020-09-21 Krok 3 - Korekcja  pozycji
+//Uruchamia KP5 i move, przesuwa cale zespoly zgodnie z parametrami w drzewie
+
+let tempList, lErrors, l1 (list)
+let real1 (real)
+let i (integer)
+Let myPocketPS (AdvisorParameterSet)
+let open1 (OpenBodyFeature)
+let myValue, temp, len (LENGTH)
+let root (VPMReference)
+let tempReal (Real)
+let len1 (LENGTH)
+let ang1 (ANGLE)
+let myList7, myList7Copy, myKorektaList (AdvisorParameterSet)
+
+myList7 = Sys\Advanced\List7Param
+myList7Copy = Sys\Advanced\List7CopyParam
+myKorektaList = Sys\Advanced\KorektaListParam
+
+root = GetEditorRoots("VPMReference").GetItem(1)
+System\Empty\Point1234567890.coord(1) //update patternu
+
+i = 1
+for tempReal inside KorektaList{ //Kopiowanie KorektaList do List7Copy
+	if(mod(i,4) <> 0){ //nie kat
+		len1 = tempReal
+		myList7Copy->SetAttributeDimension("List7CopyP."+ToString(i), len1, "LENGTH")
+	}
+	else
+	{
+		ang1 = tempReal
+		myList7Copy->SetAttributeDimension("List7CopyP."+ToString(i), ang1, "Angle")
+	}
+	i = i + 1
+}
+
+moveToDo = true //W kroku 2 wykonywany jest tez KP5, ale moveToDo ustawiany jest na false
+
+System\Empty\Point1234567890.Activity = false //update
+System\Empty\Point1234567890.Activity = true //update
+Sys\KnowledgePattern5 -> Update()
+
+
+
+//Krok4
+//wywoluje KP4driver
+
+System\Empty\Point1234567890.coord(1) //update patternow
+
+let sha (Feature)
+let dt (DesignTableType)
+let sh (DTSheetType)
+let root (VPMReference)
+let lErrors (list)
+let shapeName (string)
+
+root = GetEditorRoots("VPMReference").GetItem(1)
+sha = root-> Query("PartFeature", "")->GetItem(root-> Query("PartFeature", "").Size())
+shapeName = sha.Name
+sha = GetRootUI()
+
+if(sha.Name == shapeName ){
+	if(Sys\KnowledgePattern5\PunktyKorekta1.Size() >=  Sys\MainKnowlegde3Pattern\PunktyFotelNowe .Size()){
+		if(Sys\Advanced\MeasureInt   == 1){ //rusza KP4driver
+			Sys\Advanced\MeasureInt = 0
+		}
+		else{
+			Sys\Advanced\MeasureInt = 1
+		}
+	}
+	else{
+		Message("Prosze uruchomic najpierw Krok 2 lub 3")
+	}
+}
+else{
+	Message("Prosze aktywowac Shape")
+}
+
+//Instrukcja:
+//1. Uruchomić akcje klikajac "OK"
+//2. Po wykonaniu kroku 4 sprawdzone zostana wszystkie pozycje 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* Action created by jakub.krajanowski 2021-04-19 */
+//All in (Wszystkie do sprawdzenia)
+
+let i (Integer)
+
+doSprawdzenia.RemoveAll()
+
+i = 1
+for i while i <=Sys\Krok1Show1Size {
+	if(Krok1Show1  -> GetItem(i) == true){
+		if(mod(i,2) == 1) {
+			doSprawdzenia.Append(i)
+		}
+	}
+}
+
+System\Empty\Point1234567890.Activity = false //update
+System\Empty\Point1234567890.Activity = true //update
+`Relations\Krok 3 - Korekcja pozycji`.Update() //pozwala uruchomic KP4 bezposrednio po wykonaniu kroku 1 bez pomiarow
+
+
+//Instrukcja: 
+//1. Uruchomić akcje klikajac "OK"
+//2. Wybrac powierzchnie fotela uproszczonego, 
+//ktorego adapter ma byc ustawiony ponownie 
+//3. Krok 2 działa już dla tego adaptera
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* Action created by jakub.krajanowski 2021-11-09 */
+//Resetuje parametr AdapterUstawiony dla danej pary
+
+let str (String)
+let lminus, rzad, numer_bzw, num, i, j (Integer)
+Let myPocketPS (AdvisorParameterSet)
+
+if (dbo.Name.Search("Lewa", 1, true) >= 0){
+	lminus = 1
+}
+else{
+	lminus = 0
+}
+
+str = dbo.Name->Extract(0,10)
+rzad = ReplaceSubText(ReplaceSubText(ReplaceSubText(ReplaceSubText(ReplaceSubText(str , "Rzad", ""), " Lew", ""), "Praw", ""), "a", ""), "R", "")->ToReal() //pozostawienie samej liczby z nazwy ostatniego widocznego punktu
+numer_bzw = rzad*2 - lminus //bezwzgledy numer pary
+
+num = numer_bzw //numer widocznej pary
+j = 1
+for i while j < numer_bzw*2{
+	if(Krok1Show1.GetItem(j) == false and Krok1Show1.GetItem(j+1) == false){
+		num = num - 1
+	}
+	j = j + 2
+}
+
+myPocketPS = Sys\kes\AdapUstParam
+myPocketPS->SetAttributeString("String."+ToString(num), "false") //AdapterUstawiony
+
+System\Empty\Point1234567890.Activity = false //update
+System\Empty\Point1234567890.Activity = true //update
+
+
+///* Action created by jakub.krajanowski 2020-06-17 */ //przesun zlozenia robione na move
+//przesuwa zlozenia adapterow zgodnie z ruchami fotela //uruchamiany z KES_Bridge2
+
+let i, numer_bzw, rzad, lminus (Integer)
+let p, newPoint (point)
+let AssemblyXY, AssemblyZX, AssemblyYZ, newPlaneXY, newPlaneZX, newPlaneYZ  (Plane)
+let pathOfAssembly, pathOfSeat, pName, x_str,y_str,z_str, searchStr, szer_str (String)
+let vpminstCurrent, vpminst (VPMInstance)
+let root (VPMReference)
+let shape(`3DShape`)
+let mList, vpminstList, list1 (list)
+let BodyPart (BodyFeature)
+let saZlozenia (Boolean)
+let vmpIter (VPMInstance)
+let createdCoincidence (MRXCoincidence)
+let x, y, z (LENGTH)
+let mt (Matrix)
+let x_int,y_int,z_int, szer_int  (Real)
+
+root=GetEditorRoots("VPMReference").GetItem(1)
+
+saZlozenia = false
+list1 = root.Children.Filter("VPMInstance","")
+for vmpIter inside list1{
+	if vmpIter.Name->Search("InstancesCopied")>=0{
+		saZlozenia = true
+		set vpminst = vmpIter
+		vpminstList.Append(vpminst)
+	}
+}
+
+if(saZlozenia){ //jesli sa utworzne zlozenia
+	
+	for vpminst inside vpminstList{ //znajduje instancje po nazwie
+		szer_str = DimToString(SzerokoscFotela, "mm")
+		szer_int = ReplaceSubText(szer_str, "mm", "").ToReal()		
+		mt=vpminst.PositionMatrix //zmiana z wiezow na macierze ze wzgledu na czeste bledy przebudowy przesuwanego adaptera
+		//Notify("mt: #; #; #", mt->Get(3,4), mt->Get(2,4), mt->Get(1,4))
+		y_int = mt->Get(2,4)		
+		if (y_int > 0) { //jesli lewy rzad
+			if( y_int < 650){ //jesli zlozenie jest przesuniete na miejsce lewego fotela //650 wspolrzeda polowy odleglosci miedzy wewnetrznym fotelem a srodkiem pary  
+				mt->Set(2, 4, y_int + szer_int/2) //punkt jest na srodku lewego siedzenia
+			}
+			else{ //jesli zlozneie jest miedzy fotelami 
+				mt->Set(2, 4, y_int - szer_int/2)
+			}
+		}
+		else{
+			if ( y_int > -650) { 
+				mt->Set(2, 4, y_int - szer_int/2) //punkt jest na srodku lewego siedzenia
+			}
+			else{
+				mt->Set(2, 4, y_int + szer_int/2)
+			}
+			Notify("#, #", vpminst.Name, y_int)
+		}
+		vpminst.PositionMatrix = mt
+	}
+}
+else{
+	Notify("Brak zlozen do przesuniecia")
+}
+
+/* Action created by jakub.krajanowski 2021-11-09 */
+//odczytywanie wszsytkich elementow wybramej listy u pacjenta bez licencji
+
+Let i (Integer)
+
+i = 1
+for i while i <= list1.Size() {
+	Notify(list1.GetItem(i))
+}
+
+/* Action created by jakub.krajanowski 2021-02-15 */
+//make_public
+
+let p1 (point)
+let li1 (line)
+let su1 (surface)
+let list1 (list)
+let root (VPMReference)
+let act (AdvisorAction)
+let str1 (String)
+let op1 (OpenBodyFeature)
+let c1 (Curve)
+
+root = GetEditorRoots("VPMReference").GetItem(1)
+root.V_description = "j.kaleta spacing automation assembly public"
+Sys\kes\reset .Run()
+
+list1 = Fotele .Query("Surface", "")
+for su1 inside list1{
+	su1.Delete()
+}
+
+list1 = Korekta  .Query("Surface", "")
+for su1 inside list1{
+	su1.Delete()
+}
+
+list1 = Measure   .Query("Line", "")
+for li1 inside list1{
+	li1.Delete()
+}
+
+list1 = Measure1    .Query("Line", "")
+for li1 inside list1{
+	li1.Delete()
+}
+
+list1 = System\PunktyFotel     .Query("Point", "")
+for p1 inside list1{
+	p1.Delete()
+}
+
+list1 = System\PunktyFotelNowe      .Query("Point", "")
+for p1 inside list1{
+	p1.Delete()
+}
+
+list1 = Przekroje       .Query("Curve", "")
+for c1 inside list1{
+	c1.Delete()
+}
+
+KP5Points.RemoveAll()
+
+System .Show = false
+Podloga .Show = true
+PodlogiWzory\PodlogaIvecoPrzyklad .Show = false
+op1 = root.Find("OpenBodyFeature", "x.Name == \"Podloga 5\"",  true)
+if op1<> NULL{
+	op1.Delete()
+}
+op1 = root.Find("OpenBodyFeature", "x.Name == \"PodlogaDev\"",  true)
+if op1<> NULL{
+	op1 .Delete()
+}
+Sciany  .Show = true
+ScianyWzory\ScianyIvecoPrzyklad .Show = false
+op1 = root.Find("OpenBodyFeature", "x.Name == \"Sciany 5\"",  true)
+if op1<> NULL{
+	op1 .Delete()
+}
+op1 = root.Find("OpenBodyFeature", "x.Name == \"ScianyDev\"",  true)
+if op1<> NULL{
+	op1 .Delete()
+}
+Adapter_x_y_n  .Show = true
+AdapterKopia .Show = false
+Przekroje   .Show = true
+Makieta.Show = true
+Sys\KP3driver .Activity = true
+Sys\KES_brigde1  .Activity = true
+Sys\KES_brigde2  .Activity = true
+
+let dt (DesignTableType)
+let myShape (Feature)
+myShape = System.Owner
+//dt = myShape.Find("DesignTableType", "", true)
+//dt.Delete()
+
+root.Update()
+
+AnnotationSet1 .RepairDeleteInvalidFTAFeatures(32)
+
+
